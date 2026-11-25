@@ -33,6 +33,7 @@ public sealed record AzDoResult<T>(AzDoResultStatus Status, T? Value = default, 
 /// <param name="RepositoryId">The repository's ID, which the comment thread API needs.</param>
 /// <param name="SourceRefName">Full ref name, such as <c>refs/heads/feature/x</c>.</param>
 /// <param name="RequiredReviewers">Reviewers that must approve, in the order Azure DevOps lists them.</param>
+/// <param name="HasConflicts">The last merge attempt found conflicts with the target branch.</param>
 public sealed record AzDoPullRequest(
     int Id,
     string Title,
@@ -44,7 +45,8 @@ public sealed record AzDoPullRequest(
     string? Author,
     DateTimeOffset? Created,
     Uri WebUrl,
-    IReadOnlyList<AzDoReviewer> RequiredReviewers);
+    IReadOnlyList<AzDoReviewer> RequiredReviewers,
+    bool HasConflicts = false);
 
 /// <param name="Name">A user or a group, such as <c>[Project]\Code Reviewers</c>.</param>
 /// <param name="Approved">Voted Approved or Approved with suggestions, directly or through a member voting for the group.</param>

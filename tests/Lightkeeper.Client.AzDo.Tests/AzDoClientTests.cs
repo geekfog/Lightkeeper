@@ -35,6 +35,7 @@ public sealed class AzDoClientTests
         Assert.True(first.IsDraft);
         Assert.Equal(new Uri("https://dev.azure.com/fabrikam/Fabrikam%20Fiber/_git/repo-1/pullrequest/1"), first.WebUrl);
         Assert.Equal("repo-id-1", first.RepositoryId);
+        Assert.Equal([true, false], result.Value!.Select(pr => pr.HasConflicts));
         Assert.Equal(
             [new AzDoReviewer(@"[DC]\Code Reviewers", true, true, ["Ana Diaz"]), new AzDoReviewer("Lee Park", false, false, [])],
             first.RequiredReviewers,
@@ -157,6 +158,7 @@ public sealed class AzDoClientTests
                     new JsonObject { ["id"] = "ana", ["displayName"] = "Ana Diaz", ["vote"] = 10, ["votedFor"] = new JsonArray(new JsonObject { ["id"] = "group" }) },
                     new JsonObject { ["id"] = "lee", ["displayName"] = "Lee Park", ["isRequired"] = true, ["vote"] = -5 }),
                 ["targetRefName"] = "refs/heads/main",
+                ["mergeStatus"] = id == 1 ? "conflicts" : "succeeded",
             })]),
         }.ToJsonString();
 }

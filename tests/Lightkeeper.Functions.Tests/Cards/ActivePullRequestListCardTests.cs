@@ -55,12 +55,12 @@ public sealed class ActivePullRequestListCardTests
         Assert.Equal("2 active pull requests: Ready for review: !2 Announced", card.FallbackText);
 
         var (details, review) = Block(card.Body[1]);
-        Assert.Equal("**!1** [Fix (login)](https://dev.azure.com/fabrikam/Fabrikam/_git/Fabrikam/pullrequest/1)", Text(details[0]));
+        Assert.Equal(ActivePullRequestListCard.CompletionMarker + " **!1** [Fix (login)](https://dev.azure.com/fabrikam/Fabrikam/_git/Fabrikam/pullrequest/1)", Text(details[0]));
         var facts = Assert.IsType<AdaptiveRichTextBlock>(details[1]).Inlines;
         Assert.Equal($"👤 Jamal Hartnett · 📅 {CardStyle.LocalDate(created)} (19d) 🌿 Fabrikam · feature → main", string.Concat(facts.Select(r => r.Text)));
         var red = Assert.Single(facts, r => r.Color is not null);
         Assert.Equal(("(19d)", CardStyle.Failure.TextColor), (red.Text, red.Color));
-        Assert.Equal(ActivePullRequestListCard.CommentsMarker + " 1/1" + ActivePullRequestListCard.CommentsSuffix, Text(details[2]));
+        Assert.Equal(ActivePullRequestListCard.CommentsMarker + " 1/1" + ActivePullRequestListCard.CommentsSuffix, RichText(details[2]));
         Assert.Equal(ActivePullRequestListCard.RequiredReviewersPrefix + "✅ Code Reviewers (Ana Diaz)", Text(details[3]));
         Assert.Equal((ActivePullRequestListCard.ReviewButtonName, "https://dev.azure.com/fabrikam/Fabrikam/_git/Fabrikam/pullrequest/1"), (review.Title, review.Url));
 
@@ -68,9 +68,51 @@ public sealed class ActivePullRequestListCardTests
         var (announced, _) = Block(card.Body[2]);
         Assert.StartsWith(ActivePullRequestListCard.AnnouncedMarker + " **!2**", Text(announced[0]), StringComparison.Ordinal);
         Assert.Equal(2, announced.Count);
-        Assert.Equal("👤 Jamal Hartnett · 📅 Now 🌿 Fabrikam · feature → main", string.Concat(Assert.IsType<AdaptiveRichTextBlock>(announced[1]).Inlines.Select(r => r.Text)));
+        Assert.Equal("👤 Jamal Hartnett · 📅 Now 🌿 Fabrikam · feature → main", RichText(announced[1]));
 
         Assert.Empty(card.Actions);
+    }
+
+    [Theory]
+    [InlineData(false, true, true, 5, ActivePullRequestListCard.CompletionMarker)]
+    [InlineData(true, true, true, null, ActivePullRequestListCard.CompletionMarker)]
+    [InlineData(false, true, false, 5, ActivePullRequestListCard.OverdueMarker)]
+    [InlineData(false, false, false, 5, ActivePullRequestListCard.OverdueMarker)]
+    [InlineData(false, true, false, 1, ActivePullRequestListCard.NeedsApprovalMarker)]
+    [InlineData(false, false, false, null, ActivePullRequestListCard.NeedsApprovalMarker)]
+    [InlineData(true, true, false, null, null)]
+    [InlineData(true, false, false, null, null)]
+    public void Status_marker_shows_approved_then_overdue_then_needs_approval_and_nothing_extra_for_the_announced_one(
+        bool isAnnounced, bool hasRequiredReviewer, bool approved, int? businessDays, string? expected)
+    {
+        var reviewers = hasRequiredReviewer ? new[] { new AzDoReviewer("Ana Diaz", false, approved, []), new AzDoReviewer("Lee Park", false, true, []) } : [];
+        ActivePullRequestListCard.Age? age = businessDays is { } days ? new(0, 0, days, days, days) : null;
+
+        Assert.Equal(expected, ActivePullRequestListCard.StatusMarker(FakeAzDoClient.PullRequest(1, "PR", false, reviewers), isAnnounced, age));
+    }
+
+    [Fact]
+    public void Title_line_puts_the_star_before_the_status_marker()
+    {
+        var approved = new AzDoReviewer("Ana Diaz", false, true, []);
+        var card = ActivePullRequestListCard.Create(Subject, [FakeAzDoClient.PullRequest(2, "Announced", false, approved)], new Dictionary<int, AzDoCommentCount>(), NoAnnouncements, Now);
+
+        var (announced, _) = Block(card.Body[1]);
+        Assert.StartsWith($"{ActivePullRequestListCard.AnnouncedMarker} {ActivePullRequestListCard.CompletionMarker} **!2**", Text(announced[0]), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Overdue_pull_request_needing_approval_is_marked_and_a_recent_one_is_marked_for_review()
+    {
+        var card = ActivePullRequestListCard.Create(
+            Subject with { Facts = Subject.Facts with { Reference = "!9" } },
+            [FakeAzDoClient.PullRequest(1, "Old") with { Created = Now.AddDays(-30) }, FakeAzDoClient.PullRequest(2, "Recent") with { Created = Now.AddDays(-1) }],
+            new Dictionary<int, AzDoCommentCount>(),
+            NoAnnouncements,
+            Now);
+
+        Assert.StartsWith(ActivePullRequestListCard.OverdueMarker + " **!1**", Text(Block(card.Body[1]).Details[0]), StringComparison.Ordinal);
+        Assert.StartsWith(ActivePullRequestListCard.NeedsApprovalMarker + " **!2**", Text(Block(card.Body[2]).Details[0]), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -152,17 +194,28 @@ public sealed class ActivePullRequestListCardTests
     [InlineData(2, 2, " 2/2", "good")]
     public void Comments_show_resolved_of_total_with_a_green_check_when_all_are_resolved_and_red_otherwise(int resolved, int total, string expected, string? color)
     {
-        var text = ActivePullRequestListCard.Comments(new AzDoCommentCount(resolved, total))!;
+        var run = Assert.Single(ActivePullRequestListCard.CommentsLine(new AzDoCommentCount(resolved, total), hasConflicts: false)!.Inlines);
 
-        Assert.Equal(ActivePullRequestListCard.CommentsMarker + expected + ActivePullRequestListCard.CommentsSuffix, text.Text);
-        Assert.Equal(color, text.Color);
+        Assert.Equal(ActivePullRequestListCard.CommentsMarker + expected + ActivePullRequestListCard.CommentsSuffix, run.Text);
+        Assert.Equal(color, run.Color);
     }
 
     [Fact]
-    public void No_comments_or_unknown_count_has_no_comment_line()
+    public void Merge_conflicts_show_in_red_after_the_comment_count_or_alone()
     {
-        Assert.Null(ActivePullRequestListCard.Comments(new AzDoCommentCount(0, 0)));
-        Assert.Null(ActivePullRequestListCard.Comments(null));
+        var withComments = ActivePullRequestListCard.CommentsLine(new AzDoCommentCount(2, 2), hasConflicts: true)!.Inlines;
+        var alone = Assert.Single(ActivePullRequestListCard.CommentsLine(null, hasConflicts: true)!.Inlines);
+
+        Assert.Equal($"{ActivePullRequestListCard.CommentsMarker} 2/2{ActivePullRequestListCard.CommentsSuffix} · {ActivePullRequestListCard.ConflictsText}", string.Concat(withComments.Select(r => r.Text)));
+        Assert.Equal((ActivePullRequestListCard.ConflictsText, CardStyle.Failure.TextColor), (withComments[^1].Text, withComments[^1].Color));
+        Assert.Equal((ActivePullRequestListCard.ConflictsText, CardStyle.Failure.TextColor), (alone.Text, alone.Color));
+    }
+
+    [Fact]
+    public void No_comments_or_unknown_count_and_no_conflicts_has_no_comment_line()
+    {
+        Assert.Null(ActivePullRequestListCard.CommentsLine(new AzDoCommentCount(0, 0), hasConflicts: false));
+        Assert.Null(ActivePullRequestListCard.CommentsLine(null, hasConflicts: false));
     }
 
     [Theory]
@@ -175,8 +228,9 @@ public sealed class ActivePullRequestListCardTests
 
     private static string Text(AdaptiveElement element) => Assert.IsType<AdaptiveTextBlock>(element).Text;
 
-    private static string FactsText(AdaptiveElement block) =>
-        string.Concat(Assert.IsType<AdaptiveRichTextBlock>(Block(block).Details[1]).Inlines.Select(r => r.Text));
+    private static string RichText(AdaptiveElement element) => string.Concat(Assert.IsType<AdaptiveRichTextBlock>(element).Inlines.Select(r => r.Text));
+
+    private static string FactsText(AdaptiveElement block) => RichText(Block(block).Details[1]);
 
     /// <summary>The title, which spans the block, followed by the lines beside the review button.</summary>
     private static (IReadOnlyList<AdaptiveElement> Details, AdaptiveOpenUrlAction Review) Block(AdaptiveElement element)

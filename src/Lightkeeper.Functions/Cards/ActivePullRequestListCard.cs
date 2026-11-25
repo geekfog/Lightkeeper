@@ -19,22 +19,36 @@ public static class ActivePullRequestListCard
     /// <summary>In place of the date and age of the pull request being announced, which has just become ready for review.</summary>
     public const string Now = "Now";
 
-    /// <summary>A text check mark (the variation selector stops it rendering as a fixed-color emoji), colored by <see cref="Comments"/>.</summary>
+    /// <summary>A text check mark (the variation selector stops it rendering as a fixed-color emoji), colored by <see cref="CommentsLine"/>.</summary>
     public const string CommentsMarker = "\u2714\uFE0E";
 
     /// <summary>In front of the pull request being announced.</summary>
     public const string AnnouncedMarker = "⭐";
 
+    /// <summary>In front of a pull request every required reviewer approved, so it only needs completing.</summary>
+    public const string CompletionMarker = "🏁";
+
+    /// <summary>In front of an overdue pull request (see <see cref="OverdueAfterBusinessDays"/>) that still needs an approval.</summary>
+    public const string OverdueMarker = "🙈";
+
+    /// <summary>In front of any other pull request that still needs an approval, other than the one being announced.</summary>
+    public const string NeedsApprovalMarker = "🔍";
+
     /// <summary>A pull request waiting more than this many business days (Monday to Friday) shows its age in red.</summary>
     public const int OverdueAfterBusinessDays = 2;
 
     public const string CommentsSuffix = " comments resolved";
+    public const string ConflictsText = "Merge conflicts";
     public const string RequiredReviewersPrefix = "Required: ";
 
     /// <summary>Keeps the card under the Teams message size limit; each row also costs one comment thread lookup.</summary>
     public const int MaxListed = 15;
 
     private const string ItemSeparator = " · ";
+    private const string Space = " ";
+
+    /// <summary>Unresolved comments, merge conflicts, and an overdue age.</summary>
+    private static readonly string AlertColor = CardStyle.Failure.TextColor;
     private const string AgeSeparator = ", ";
     private const string BranchArrow = " → ";
     private const string NameSeparator = ", ";
@@ -98,16 +112,30 @@ public static class ActivePullRequestListCard
 
     internal static string Title(int count) => count == 1 ? "1 active pull request" : string.Create(CultureInfo.InvariantCulture, $"{count} active pull requests");
 
-    /// <summary>Resolved out of total comment threads, such as <c>✔ 2/2 comments resolved</c>, with a green check when all are resolved and red otherwise; null when there are none or the count is unknown.</summary>
-    internal static AdaptiveTextBlock? Comments(AzDoCommentCount? count) => count switch
+    /// <summary>
+    /// Resolved out of total comment threads, such as <c>✔ 2/2 comments resolved</c>, green when all are resolved and red otherwise, then
+    /// <see cref="ConflictsText"/> in red when the pull request has merge conflicts; null when there is neither.
+    /// </summary>
+    /// <param name="count">Null or zero total shows no comment count.</param>
+    internal static AdaptiveRichTextBlock? CommentsLine(AzDoCommentCount? count, bool hasConflicts)
     {
-        null or { Total: 0 } => null,
-        _ => new(string.Create(CultureInfo.InvariantCulture, $"{CommentsMarker} {count.Resolved}/{count.Total}{CommentsSuffix}"))
+        List<AdaptiveTextRun> runs = [];
+        if (count is { Total: > 0 })
         {
-            Color = count.Resolved == count.Total ? CardStyle.Success.TextColor : CardStyle.Failure.TextColor,
-            Spacing = "None",
-        },
-    };
+            runs.Add(new(string.Create(CultureInfo.InvariantCulture, $"{CommentsMarker} {count.Resolved}/{count.Total}{CommentsSuffix}"))
+            {
+                Color = count.Resolved == count.Total ? CardStyle.Success.TextColor : AlertColor,
+            });
+        }
+
+        if (hasConflicts)
+        {
+            if (runs.Count > 0) runs.Add(new(ItemSeparator) { IsSubtle = true });
+            runs.Add(new(ConflictsText) { Color = AlertColor });
+        }
+
+        return runs.Count == 0 ? null : new AdaptiveRichTextBlock(runs) { Spacing = "None" };
+    }
 
     /// <summary>Such as <c>✅ Code Reviewers (Jamal Hartnett)</c> for a group a member approved for, or <c>Jamal Hartnett</c> for a user yet to approve.</summary>
     internal static string Reviewer(AzDoReviewer reviewer)
@@ -161,18 +189,34 @@ public static class ActivePullRequestListCard
         return count;
     }
 
+    /// <summary>Has at least one required reviewer and every one approved; with none, the approvals still needed are unknown.</summary>
+    internal static bool IsApproved(AzDoPullRequest pr) => pr.RequiredReviewers.Count > 0 && pr.RequiredReviewers.All(r => r.Approved);
+
+    /// <summary>
+    /// What the pull request is waiting for: <see cref="CompletionMarker"/> when approved; otherwise <see cref="OverdueMarker"/> when overdue,
+    /// <see cref="NeedsApprovalMarker"/> when not, and nothing for the one being announced, which <see cref="AnnouncedMarker"/> already marks.
+    /// </summary>
+    /// <param name="age">Null when not measured, as for the one being announced.</param>
+    internal static string? StatusMarker(AzDoPullRequest pr, bool isAnnounced, Age? age) =>
+        IsApproved(pr) ? CompletionMarker
+        : isAnnounced ? null
+        : age is { IsOverdue: true } ? OverdueMarker
+        : NeedsApprovalMarker;
+
     private static bool IsAnnounced(AzDoPullRequest pr, string? reference) => PullRequestCardFormatter.Reference(pr.Id) == reference;
 
     /// <summary>
-    /// One pull request (starred when it is the one being announced): its number and linked title across the full width; under it, author, the date it
-    /// became ready for review (each viewer's own time zone) and age, repository, and branches, then its comment count and required reviewers when it has
-    /// any, with a <see cref="ReviewButtonName"/> button to their right.
+    /// One pull request, prefixed by <see cref="AnnouncedMarker"/> when it is the one being announced and its <see cref="StatusMarker"/>: its number and linked
+    /// title across the full width; under it, author, the date it became ready for review (each viewer's own time zone) and age, repository, and branches,
+    /// then its comment count and merge conflicts, and required reviewers, when it has any, with a <see cref="ReviewButtonName"/> button to their right.
     /// </summary>
     private static AdaptiveContainer Block(AzDoPullRequest pr, AzDoCommentCount? comments, DateTimeOffset? readySince, bool isAnnounced, DateTimeOffset now)
     {
-        var title = new AdaptiveTextBlock($"{(isAnnounced ? AnnouncedMarker + " " : string.Empty)}**{PullRequestCardFormatter.Reference(pr.Id)}** [{LinkText(pr.Title)}]({pr.WebUrl.AbsoluteUri})");
-        List<AdaptiveElement> details = [FactsLine(pr, readySince, isAnnounced, now)];
-        if (Comments(comments) is { } commentLine) details.Add(commentLine);
+        Age? age = !isAnnounced && readySince is { } ready ? AgeOf(ready, now) : null;
+        var markers = string.Join(Space, new[] { isAnnounced ? AnnouncedMarker : null, StatusMarker(pr, isAnnounced, age) }.Where(m => m is not null));
+        var title = new AdaptiveTextBlock($"{markers} **{PullRequestCardFormatter.Reference(pr.Id)}** [{LinkText(pr.Title)}]({pr.WebUrl.AbsoluteUri})");
+        List<AdaptiveElement> details = [FactsLine(pr, readySince, isAnnounced, age)];
+        if (CommentsLine(comments, pr.HasConflicts) is { } commentLine) details.Add(commentLine);
         if (pr.RequiredReviewers.Count > 0)
         {
             details.Add(new AdaptiveTextBlock(RequiredReviewersPrefix + string.Join(NameSeparator, pr.RequiredReviewers.Select(Reviewer))) { Spacing = "None" });
@@ -192,18 +236,19 @@ public static class ActivePullRequestListCard
     /// One wrapping line, such as <c>👤 Josh Jung · 📅 Fri, Apr 24, 2026 (7M) 🌿 repo · source → target</c>, with the age in red when overdue.
     /// The pull request being announced shows <c>📅 Now</c> with no age; one ready since earlier the same day shows its date with no age.
     /// </summary>
-    private static AdaptiveRichTextBlock FactsLine(AzDoPullRequest pr, DateTimeOffset? readySince, bool isAnnounced, DateTimeOffset now)
+    /// <param name="age">From <see cref="Block"/>; null for the one being announced.</param>
+    private static AdaptiveRichTextBlock FactsLine(AzDoPullRequest pr, DateTimeOffset? readySince, bool isAnnounced, Age? age)
     {
         var branches = string.Join(BranchArrow, new[] { pr.SourceRefName, pr.TargetRefName }.Where(b => b is not null).Select(b => CardStyle.Branch(b!)));
-        Age? age = !isAnnounced && readySince is { } ready ? AgeOf(ready, now) : null;
         var when = isAnnounced ? Now : readySince is { } date ? CardStyle.LocalDate(date) : null;
         var who = Join(pr.Author is { } author ? $"{AuthorMarker} {author}" : null, when is null ? null : $"{ReadyMarker} {when}");
 
-        List<AdaptiveTextRun> runs = [new(who + " ") { IsSubtle = true }];
+        List<AdaptiveTextRun> runs = [new(who + Space) { IsSubtle = true }];
         if (age is { TotalDays: > 0 } shownAge)
         {
-            runs.Add(shownAge.IsOverdue ? new($"({shownAge})") { Color = CardStyle.Failure.TextColor } : new($"({shownAge})") { IsSubtle = true });
-            runs.Add(new(" ") { IsSubtle = true });
+            var ageText = $"({shownAge})";
+            runs.Add(shownAge.IsOverdue ? new(ageText) { Color = AlertColor } : new(ageText) { IsSubtle = true });
+            runs.Add(new(Space) { IsSubtle = true });
         }
 
         runs.Add(new(Join($"{RepositoryMarker} {pr.Repository}", branches)) { IsSubtle = true });

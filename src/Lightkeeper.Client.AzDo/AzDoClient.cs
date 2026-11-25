@@ -25,6 +25,9 @@ public sealed partial class AzDoClient(HttpClient httpClient, IOptions<AzDoOptio
     private static readonly HashSet<string> ResolvedThreadStatuses = new(["fixed", "wontFix", "closed", "byDesign"], StringComparer.OrdinalIgnoreCase);
 
     private const string SystemCommentType = "system";
+
+    /// <summary>The <c>mergeStatus</c> value for a merge that found conflicts.</summary>
+    private const string ConflictsMergeStatus = "conflicts";
     private const string BasicScheme = "Basic";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -118,7 +121,8 @@ public sealed partial class AzDoClient(HttpClient httpClient, IOptions<AzDoOptio
             pr.CreatedBy?.DisplayName,
             pr.CreationDate,
             AzDoUrls.PullRequestPage(organization, project, repository, pr.PullRequestId),
-            [.. reviewers.Where(r => r.IsRequired == true && !string.IsNullOrWhiteSpace(r.DisplayName)).Select(r => Reviewer(r, reviewers))]);
+            [.. reviewers.Where(r => r.IsRequired == true && !string.IsNullOrWhiteSpace(r.DisplayName)).Select(r => Reviewer(r, reviewers))],
+            ConflictsMergeStatus.Equals(pr.MergeStatus, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>A member's approval of a group shows on the member, whose <c>votedFor</c> names the group.</summary>
@@ -142,7 +146,8 @@ public sealed partial class AzDoClient(HttpClient httpClient, IOptions<AzDoOptio
         IdentityRef? CreatedBy,
         DateTimeOffset? CreationDate,
         GitRepositoryRef? Repository,
-        IReadOnlyList<GitReviewer>? Reviewers);
+        IReadOnlyList<GitReviewer>? Reviewers,
+        string? MergeStatus);
 
     private sealed record IdentityRef(string? Id, string? DisplayName);
 
