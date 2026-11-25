@@ -15,7 +15,7 @@ public sealed class PullRequestCardFormatter(string eventType) : IServiceHookCar
     {
         public const string Project = "📁 Project";
         public const string PullRequest = "🔢 Pull request";
-        public const string Author = "👤 Author";
+        public const string Author = $"{CardStyle.PersonMarker} Author";
         public const string Reviewers = "👥 Reviewers";
         public const string Created = "🗓️ Created";
     }

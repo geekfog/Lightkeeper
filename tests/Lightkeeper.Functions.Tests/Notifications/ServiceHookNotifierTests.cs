@@ -244,7 +244,7 @@ public sealed class ServiceHookNotifierTests
         var blocks = Assert.Single(_workflow.Submissions).Card.Body.OfType<AdaptiveContainer>().Where(c => c.Items is [AdaptiveTextBlock, AdaptiveColumnSet]).ToList();
         Assert.Equal(["!3", "!2", "!1"], blocks.Select(b => ((AdaptiveTextBlock)b.Items[0]).Text.Split("**")[1]));
         var facts = ((AdaptiveRichTextBlock)((AdaptiveColumnSet)blocks[1].Items[1]).Columns[0].Items[0]).Inlines;
-        Assert.StartsWith($"👤 Jamal Hartnett · 📅 {CardStyle.LocalDate(published)}", string.Concat(facts.Select(r => r.Text)), StringComparison.Ordinal);
+        Assert.StartsWith($"🧑 Jamal Hartnett · 📅 {CardStyle.LocalDate(published)}", string.Concat(facts.Select(r => r.Text)), StringComparison.Ordinal);
     }
 
     [Fact]

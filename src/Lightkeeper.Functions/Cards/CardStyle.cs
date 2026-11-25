@@ -18,6 +18,12 @@ public static class CardStyle
     public static readonly Tone Info = new("🔔", "emphasis", "light", "#1F5F5B");
     public static readonly Tone WorkItem = new("📋", "emphasis", "light", "#4A2C6D");
 
+    /// <summary>In front of a person's name on every card: the gender-neutral person emoji, whose yellow pairs with <see cref="PersonColor"/>.</summary>
+    public const string PersonMarker = "🧑";
+
+    /// <summary>Amber, the Adaptive Card color closest to <see cref="PersonMarker"/>, for a person's name where a card can color it.</summary>
+    public static readonly string PersonColor = Warning.TextColor;
+
     private const string Ellipsis = "…";
     private const string RightAlignment = "Right";
     private const string ButtonSpacing = "Small";
@@ -87,9 +93,12 @@ public static class CardStyle
     {
         var lines = (text ?? string.Empty).Split('\n').Select(line => line.Trim().TrimStart(MarkdownBlockMarkers).Trim());
         var collapsed = string.Join(' ', string.Join(' ', lines).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        if (collapsed.Length == 0) return null;
-        return collapsed.Length <= maxChars ? collapsed : collapsed[..(maxChars - Ellipsis.Length)].TrimEnd() + Ellipsis;
+        return collapsed.Length == 0 ? null : Truncate(collapsed, maxChars);
     }
+
+    /// <summary>The text cut to <paramref name="maxChars"/>, ending with an ellipsis when cut.</summary>
+    public static string Truncate(string text, int maxChars) =>
+        text.Length <= maxChars ? text : text[..(maxChars - Ellipsis.Length)].TrimEnd() + Ellipsis;
 
     /// <summary>
     /// Markdown kept with its line breaks, so lists, bold, and links render. Headings become bold lines so they cannot fill the card.

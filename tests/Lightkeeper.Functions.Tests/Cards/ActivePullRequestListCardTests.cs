@@ -57,18 +57,23 @@ public sealed class ActivePullRequestListCardTests
         var (details, review) = Block(card.Body[1]);
         Assert.Equal(ActivePullRequestListCard.CompletionMarker + " **!1** [Fix (login)](https://dev.azure.com/fabrikam/Fabrikam/_git/Fabrikam/pullrequest/1)", Text(details[0]));
         var facts = Assert.IsType<AdaptiveRichTextBlock>(details[1]).Inlines;
-        Assert.Equal($"👤 Jamal Hartnett · 📅 {CardStyle.LocalDate(created)} (19d) 🌿 Fabrikam · feature → main", string.Concat(facts.Select(r => r.Text)));
-        var red = Assert.Single(facts, r => r.Color is not null);
-        Assert.Equal(("(19d)", CardStyle.Failure.TextColor), (red.Text, red.Color));
+        Assert.Equal($"🧑 Jamal Hartnett · 📅 {CardStyle.LocalDate(created)} (19d) 🌿 Fabrikam · feature → main", string.Concat(facts.Select(r => r.Text)));
+        string date = CardStyle.Review.TextColor, overdue = CardStyle.Failure.TextColor, repository = CardStyle.Success.TextColor;
+        Assert.Equal(
+            [("🧑 Jamal Hartnett", CardStyle.PersonColor), (" · ", Subtle), ($"📅 {CardStyle.LocalDate(created)}", date), (" (", Subtle), ("19d", overdue), (") ", Subtle),
+             ("🌿 Fabrikam", repository), (" · ", Subtle), ("feature", repository), (" → ", Subtle), ("main", repository)],
+            Colors(details[1]));
         Assert.Equal(ActivePullRequestListCard.CommentsMarker + " 1/1" + ActivePullRequestListCard.CommentsSuffix, RichText(details[2]));
-        Assert.Equal(ActivePullRequestListCard.RequiredReviewersPrefix + "✅ Code Reviewers (Ana Diaz)", Text(details[3]));
+        Assert.Equal(
+            [(ActivePullRequestListCard.RequiredReviewersPrefix, Subtle), ("✅ Code Reviewers", null), (" (", Subtle), ("Ana Diaz", null), (")", Subtle)],
+            Colors(details[3]));
         Assert.Equal((ActivePullRequestListCard.ReviewButtonName, "https://dev.azure.com/fabrikam/Fabrikam/_git/Fabrikam/pullrequest/1"), (review.Title, review.Url));
 
         // The announced pull request shows Now; no comments or required reviewers leave those lines out rather than leaving them blank.
         var (announced, _) = Block(card.Body[2]);
         Assert.StartsWith(ActivePullRequestListCard.AnnouncedMarker + " **!2**", Text(announced[0]), StringComparison.Ordinal);
         Assert.Equal(2, announced.Count);
-        Assert.Equal("👤 Jamal Hartnett · 📅 Now 🌿 Fabrikam · feature → main", RichText(announced[1]));
+        Assert.Equal("🧑 Jamal Hartnett · 📅 Now 🌿 Fabrikam · feature → main", RichText(announced[1]));
 
         Assert.Empty(card.Actions);
     }
@@ -126,8 +131,8 @@ public sealed class ActivePullRequestListCardTests
             NoAnnouncements,
             Now);
 
-        Assert.Equal($"👤 Jamal Hartnett · 📅 {CardStyle.LocalDate(earlier)} 🌿 Fabrikam · feature → main", FactsText(card.Body[1]));
-        Assert.Equal($"👤 Jamal Hartnett · 📅 {ActivePullRequestListCard.Now} 🌿 Fabrikam · feature → main", FactsText(card.Body[2]));
+        Assert.Equal($"🧑 Jamal Hartnett · 📅 {CardStyle.LocalDate(earlier)} 🌿 Fabrikam · feature → main", FactsText(card.Body[1]));
+        Assert.Equal($"🧑 Jamal Hartnett · 📅 {ActivePullRequestListCard.Now} 🌿 Fabrikam · feature → main", FactsText(card.Body[2]));
     }
 
     [Fact]
@@ -136,13 +141,26 @@ public sealed class ActivePullRequestListCardTests
         const int TeamsMessageLimitBytes = 28 * 1024;
         var reviewers = new[] { new AzDoReviewer(@"[Fabrikam]\Code Reviewers", true, true, ["Ana Diaz", "Lee Park"]), new AzDoReviewer("Jamal Hartnett", false, false, []) };
         var reviewable = Enumerable.Range(1, ActivePullRequestListCard.MaxListed)
-            .Select(i => FakeAzDoClient.PullRequest(i, new string('x', 120), false, reviewers) with { Created = DateTimeOffset.UnixEpoch })
+            .Select(i => FakeAzDoClient.PullRequest(i, new string('x', 400), false, reviewers) with { Created = DateTimeOffset.UnixEpoch })
             .ToList();
         var comments = reviewable.ToDictionary(pr => pr.Id, _ => new AzDoCommentCount(3, 10));
 
         var json = System.Text.Json.JsonSerializer.Serialize(ActivePullRequestListCard.Create(Subject, reviewable, comments, NoAnnouncements, Now), LightkeeperJson.Options);
 
         Assert.True(System.Text.Encoding.UTF8.GetByteCount(json) < TeamsMessageLimitBytes, $"{System.Text.Encoding.UTF8.GetByteCount(json)} bytes");
+    }
+
+    [Theory]
+    [InlineData(ActivePullRequestListCard.MaxTitleChars, false)]
+    [InlineData(ActivePullRequestListCard.MaxTitleChars + 1, true)]
+    public void Long_titles_are_cut_with_an_ellipsis(int length, bool cut)
+    {
+        var title = new string('x', length);
+        var card = ActivePullRequestListCard.Create(Subject, [FakeAzDoClient.PullRequest(1, title)], new Dictionary<int, AzDoCommentCount>(), NoAnnouncements, Now);
+
+        var shown = CardStyle.Truncate(title, ActivePullRequestListCard.MaxTitleChars);
+        Assert.Equal(cut, shown.EndsWith('…'));
+        Assert.Contains($"[{shown}]", Text(Block(card.Body[1]).Details[0]), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -161,7 +179,7 @@ public sealed class ActivePullRequestListCardTests
         var card = ActivePullRequestListCard.Create(Subject with { Facts = Subject.Facts with { Reference = "!9" } }, reviewable, new Dictionary<int, AzDoCommentCount>(), announcedAt, Now);
 
         Assert.Equal([2, 1], reviewable.Select(pr => pr.Id));
-        Assert.Equal($"👤 Jamal Hartnett · 📅 {CardStyle.LocalDate(published)} (1d) 🌿 Fabrikam · feature → main", FactsText(card.Body[2]));
+        Assert.Equal($"🧑 Jamal Hartnett · 📅 {CardStyle.LocalDate(published)} (1d) 🌿 Fabrikam · feature → main", FactsText(card.Body[2]));
     }
 
     [Fact]
@@ -224,9 +242,16 @@ public sealed class ActivePullRequestListCardTests
     [InlineData("Jamal Hartnett", false, true, null, "✅ Jamal Hartnett")]
     [InlineData("Jamal Hartnett", false, false, null, "Jamal Hartnett")]
     public void Required_reviewers_are_checked_when_approved_with_who_approved_for_a_group(string name, bool isGroup, bool approved, string? by, string expected) =>
-        Assert.Equal(expected, ActivePullRequestListCard.Reviewer(new AzDoReviewer(name, isGroup, approved, by is null ? [] : [by])));
+        Assert.Equal(expected, string.Concat(ActivePullRequestListCard.Reviewer(new AzDoReviewer(name, isGroup, approved, by is null ? [] : [by])).Select(r => r.Text)));
 
     private static string Text(AdaptiveElement element) => Assert.IsType<AdaptiveTextBlock>(element).Text;
+
+    /// <summary>Stands in for a run's color when it is subtle rather than colored.</summary>
+    private const string Subtle = "subtle";
+
+    /// <summary>Each run's text with its color, <see cref="Subtle"/>, or null for the default color.</summary>
+    private static (string Text, string? Color)[] Colors(AdaptiveElement element) =>
+        [.. Assert.IsType<AdaptiveRichTextBlock>(element).Inlines.Select(r => (r.Text, r.IsSubtle == true ? Subtle : r.Color))];
 
     private static string RichText(AdaptiveElement element) => string.Concat(Assert.IsType<AdaptiveRichTextBlock>(element).Inlines.Select(r => r.Text));
 

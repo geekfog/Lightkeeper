@@ -13,7 +13,7 @@ public sealed class BuildCompletedCardFormatter : IServiceHookCardFormatter
         public const string Project = "📁 Project";
         public const string Branch = "🌿 Branch";
         public const string Repository = "📦 Repository";
-        public const string RequestedFor = "👤 Requested for";
+        public const string RequestedFor = $"{CardStyle.PersonMarker} Requested for";
         public const string Reason = "⚡ Reason";
         public const string Duration = "⏱️ Duration";
         public const string Finished = "🏁 Finished";

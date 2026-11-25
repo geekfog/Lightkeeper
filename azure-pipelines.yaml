@@ -54,4 +54,4 @@ stages:
     parameters:
       p_publishEnvironment: PRD
       p_dependsOn: Build
-      p_hasMetCondition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+      p_hasMetCondition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))
