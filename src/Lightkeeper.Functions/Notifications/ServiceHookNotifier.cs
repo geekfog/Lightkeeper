@@ -74,7 +74,7 @@ public sealed partial class ServiceHookNotifier(
                 NotificationOutcome.Skipped, $"Skipped: {skipReason}.", new NotificationTrace(subject, null, RoutingDecision.SkipByEvent, [], skipReason));
         }
 
-        var card = formatted.Card!;
+        IReadOnlyList<AdaptiveCard> cards = [formatted.Card!];
         var (rule, decision) = await RouteAsync(subject, cancellationToken);
 
         if (decision is RoutingDecision.Skip or RoutingDecision.SkipNoRule)
@@ -96,12 +96,12 @@ public sealed partial class ServiceHookNotifier(
         var listNote = string.Empty;
         if (rule?.PostsActiveList(subject) == true)
         {
-            (card, decision, listNote) = await ActiveListCardAsync(subject, card, cancellationToken);
+            (cards, decision, listNote) = await ActiveListCardsAsync(subject, cards, cancellationToken);
         }
 
         var workflowIds = rule is { Workflows.Count: > 0 } ? rule.Workflows : FallbackWorkflowOnly;
         var (targets, resolvedDecision) = await ResolveWorkflowsAsync(workflowIds, decision, cancellationToken);
-        var deliveries = await Task.WhenAll(targets.Select(t => DeliverAsync(t.Id, t.Url, card, correlationId, cancellationToken)));
+        var deliveries = await Task.WhenAll(targets.Select(t => DeliverAsync(t.Id, t.Url, cards, correlationId, cancellationToken)));
 
         if (claim == AnnouncementClaim.Claimed && !deliveries.Any(d => d.Outcome == NotificationOutcome.WorkflowAccepted))
         {
@@ -145,9 +145,12 @@ public sealed partial class ServiceHookNotifier(
         };
     }
 
-    /// <summary>The table of active pull requests in the event's project, with each shown row's comment count looked up in parallel. When Azure DevOps cannot supply it, the event's own card posts instead of nothing.</summary>
-    private async Task<(AdaptiveCard Card, RoutingDecision Decision, string Note)> ActiveListCardAsync(
-        NotificationSubject subject, AdaptiveCard eventCard, CancellationToken cancellationToken)
+    /// <summary>
+    /// The cards listing active pull requests in the event's project, with each shown row's comment count looked up in parallel. When Azure DevOps cannot supply
+    /// the list, the event's own card posts instead of nothing.
+    /// </summary>
+    private async Task<(IReadOnlyList<AdaptiveCard> Cards, RoutingDecision Decision, string Note)> ActiveListCardsAsync(
+        NotificationSubject subject, IReadOnlyList<AdaptiveCard> eventCards, CancellationToken cancellationToken)
     {
         var listing = string.IsNullOrWhiteSpace(subject.Organization) || string.IsNullOrWhiteSpace(subject.Facts.Project)
             ? null
@@ -166,7 +169,7 @@ public sealed partial class ServiceHookNotifier(
         }
 
         var reason = listing is null ? "the event has no organization or project" : $"Azure DevOps answered {listing.Status}";
-        return (eventCard, RoutingDecision.NotifyActiveListUnavailable, $" Active pull request list unavailable ({reason}), so the pull request card was posted.");
+        return (eventCards, RoutingDecision.NotifyActiveListUnavailable, $" Active pull request list unavailable ({reason}), so the pull request card was posted.");
     }
 
     /// <summary>
@@ -255,33 +258,46 @@ public sealed partial class ServiceHookNotifier(
         return (workflowIds.Distinct(StringComparer.OrdinalIgnoreCase).Select(id => (id, Resolve(id))).ToList(), decision);
     }
 
-    private async Task<WorkflowDelivery> DeliverAsync(string workflowId, Uri? url, AdaptiveCard card, string correlationId, CancellationToken cancellationToken)
+    /// <summary>Submits the cards one at a time, in order, so they post in order; stops at the first card the workflow does not accept.</summary>
+    private async Task<WorkflowDelivery> DeliverAsync(
+        string workflowId, Uri? url, IReadOnlyList<AdaptiveCard> cards, string correlationId, CancellationToken cancellationToken)
     {
         if (url is null)
         {
             return new WorkflowDelivery(workflowId, NotificationOutcome.WorkflowNotConfigured, null);
         }
 
-        var submission = await teamsWorkflow.SubmitAsync(url, card, correlationId, cancellationToken);
-        var outcome = submission.Status switch
+        var delivery = new WorkflowDelivery(workflowId, NotificationOutcome.WorkflowAccepted, null);
+        foreach (var card in cards)
         {
-            WorkflowSubmissionStatus.Accepted => NotificationOutcome.WorkflowAccepted,
-            WorkflowSubmissionStatus.Rejected => NotificationOutcome.WorkflowRejected,
-            WorkflowSubmissionStatus.TimedOut => NotificationOutcome.WorkflowTimedOut,
-            _ => NotificationOutcome.WorkflowUnreachable,
-        };
-        return new WorkflowDelivery(workflowId, outcome, submission.StatusCode);
+            var submission = await teamsWorkflow.SubmitAsync(url, card, correlationId, cancellationToken);
+            var outcome = submission.Status switch
+            {
+                WorkflowSubmissionStatus.Accepted => NotificationOutcome.WorkflowAccepted,
+                WorkflowSubmissionStatus.Rejected => NotificationOutcome.WorkflowRejected,
+                WorkflowSubmissionStatus.TimedOut => NotificationOutcome.WorkflowTimedOut,
+                _ => NotificationOutcome.WorkflowUnreachable,
+            };
+            delivery = delivery with { Outcome = outcome, StatusCode = submission.StatusCode, CardsAccepted = delivery.CardsAccepted + (outcome == NotificationOutcome.WorkflowAccepted ? 1 : 0) };
+            if (outcome != NotificationOutcome.WorkflowAccepted) break;
+        }
+
+        return delivery with { CardCount = cards.Count };
     }
 
     private static string Describe(IReadOnlyList<WorkflowDelivery> deliveries)
     {
-        var parts = deliveries.Select(d => d.Outcome switch
+        var parts = deliveries.Select(d =>
         {
-            NotificationOutcome.WorkflowAccepted => $"Teams Workflow '{d.WorkflowId}' accepted the card (HTTP {d.StatusCode}).",
-            NotificationOutcome.WorkflowRejected => $"Teams Workflow '{d.WorkflowId}' rejected the card (HTTP {d.StatusCode}).",
-            NotificationOutcome.WorkflowTimedOut => $"Teams Workflow '{d.WorkflowId}' did not respond before the configured timeout.",
-            NotificationOutcome.WorkflowNotConfigured => $"Teams Workflow '{d.WorkflowId}' has no https URL in the {NotificationTables.Workflow} table.",
-            _ => $"Teams Workflow '{d.WorkflowId}' could not be reached.",
+            var card = d.CardCount == 1 ? "the card" : $"card {d.CardsAccepted + 1} of {d.CardCount}";
+            return d.Outcome switch
+            {
+                NotificationOutcome.WorkflowAccepted => $"Teams Workflow '{d.WorkflowId}' accepted {(d.CardCount == 1 ? card : $"all {d.CardCount} cards")} (HTTP {d.StatusCode}).",
+                NotificationOutcome.WorkflowRejected => $"Teams Workflow '{d.WorkflowId}' rejected {card} (HTTP {d.StatusCode}).",
+                NotificationOutcome.WorkflowTimedOut => $"Teams Workflow '{d.WorkflowId}' did not respond to {card} before the configured timeout.",
+                NotificationOutcome.WorkflowNotConfigured => $"Teams Workflow '{d.WorkflowId}' has no https URL in the {NotificationTables.Workflow} table.",
+                _ => $"Teams Workflow '{d.WorkflowId}' could not be reached for {card}.",
+            };
         });
         var asynchronous = deliveries.Any(d => d.Outcome == NotificationOutcome.WorkflowAccepted) ? " Workflows post to Teams asynchronously." : string.Empty;
         return string.Join(" ", parts) + asynchronous;

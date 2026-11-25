@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -9,5 +10,8 @@ public static class LightkeeperJson
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+
+        // Cards go to Teams as JSON, never inside HTML, so emoji and symbols are written as UTF-8 rather than \u escapes that triple their size.
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 }

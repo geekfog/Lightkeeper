@@ -44,23 +44,28 @@ public sealed class ActivePullRequestListCardTests
     {
         var created = new DateTimeOffset(2026, 11, 4, 15, 0, 0, TimeSpan.Zero);
         var reviewers = new AzDoReviewer(@"[Fabrikam]\Code Reviewers", true, true, ["Ana Diaz"]);
-        var card = ActivePullRequestListCard.Create(
+        var card = Assert.Single(ActivePullRequestListCard.Create(
             Subject,
             [FakeAzDoClient.PullRequest(1, "Fix [login]", false, reviewers) with { Created = created }, FakeAzDoClient.PullRequest(2, "Announced")],
             new Dictionary<int, AzDoCommentCount> { [1] = new(1, 1) },
             NoAnnouncements,
-            Now);
+            Now));
 
         Assert.Equal("👀 2 active pull requests", Text(((AdaptiveContainer)card.Body[0]).Items[0]));
         Assert.Equal("2 active pull requests: Ready for review: !2 Announced", card.FallbackText);
 
-        var (details, review) = Block(card.Body[1]);
+        // The announced pull request is first and shows Now; no comments or required reviewers leave those lines out rather than leaving them blank.
+        var (announced, _) = Block(card.Body[1]);
+        Assert.StartsWith(ActivePullRequestListCard.AnnouncedMarker + " **!2**", Text(announced[0]), StringComparison.Ordinal);
+        Assert.Equal(2, announced.Count);
+        Assert.Equal("🧑 Jamal Hartnett 📅 Now 🌿 Fabrikam · feature → main", RichText(announced[1]));
+
+        var (details, review) = Block(card.Body[2]);
         Assert.Equal(ActivePullRequestListCard.CompletionMarker + " **!1** [Fix (login)](https://dev.azure.com/fabrikam/Fabrikam/_git/Fabrikam/pullrequest/1)", Text(details[0]));
-        var facts = Assert.IsType<AdaptiveRichTextBlock>(details[1]).Inlines;
-        Assert.Equal($"🧑 Jamal Hartnett · 📅 {CardStyle.LocalDate(created)} (19d) 🌿 Fabrikam · feature → main", string.Concat(facts.Select(r => r.Text)));
+        Assert.Equal($"🧑 Jamal Hartnett 📅 {CardStyle.LocalDate(created)} (19d) 🌿 Fabrikam · feature → main", RichText(details[1]));
         string date = CardStyle.Review.TextColor, overdue = CardStyle.Failure.TextColor, repository = CardStyle.Success.TextColor;
         Assert.Equal(
-            [("🧑 Jamal Hartnett", CardStyle.PersonColor), (" · ", Subtle), ($"📅 {CardStyle.LocalDate(created)}", date), (" (", Subtle), ("19d", overdue), (") ", Subtle),
+            [("🧑 Jamal Hartnett", CardStyle.PersonColor), (" ", Subtle), ($"📅 {CardStyle.LocalDate(created)}", date), (" (", Subtle), ("19d", overdue), (") ", Subtle),
              ("🌿 Fabrikam", repository), (" · ", Subtle), ("feature", repository), (" → ", Subtle), ("main", repository)],
             Colors(details[1]));
         Assert.Equal(ActivePullRequestListCard.CommentsMarker + " 1/1" + ActivePullRequestListCard.CommentsSuffix, RichText(details[2]));
@@ -68,13 +73,6 @@ public sealed class ActivePullRequestListCardTests
             [(ActivePullRequestListCard.RequiredReviewersPrefix, Subtle), ("✅ Code Reviewers", null), (" (", Subtle), ("Ana Diaz", null), (")", Subtle)],
             Colors(details[3]));
         Assert.Equal((ActivePullRequestListCard.ReviewButtonName, "https://dev.azure.com/fabrikam/Fabrikam/_git/Fabrikam/pullrequest/1"), (review.Title, review.Url));
-
-        // The announced pull request shows Now; no comments or required reviewers leave those lines out rather than leaving them blank.
-        var (announced, _) = Block(card.Body[2]);
-        Assert.StartsWith(ActivePullRequestListCard.AnnouncedMarker + " **!2**", Text(announced[0]), StringComparison.Ordinal);
-        Assert.Equal(2, announced.Count);
-        Assert.Equal("🧑 Jamal Hartnett · 📅 Now 🌿 Fabrikam · feature → main", RichText(announced[1]));
-
         Assert.Empty(card.Actions);
     }
 
@@ -100,7 +98,7 @@ public sealed class ActivePullRequestListCardTests
     public void Title_line_puts_the_star_before_the_status_marker()
     {
         var approved = new AzDoReviewer("Ana Diaz", false, true, []);
-        var card = ActivePullRequestListCard.Create(Subject, [FakeAzDoClient.PullRequest(2, "Announced", false, approved)], new Dictionary<int, AzDoCommentCount>(), NoAnnouncements, Now);
+        var card = Single(Subject, [FakeAzDoClient.PullRequest(2, "Announced", false, approved)], NoAnnouncements);
 
         var (announced, _) = Block(card.Body[1]);
         Assert.StartsWith($"{ActivePullRequestListCard.AnnouncedMarker} {ActivePullRequestListCard.CompletionMarker} **!2**", Text(announced[0]), StringComparison.Ordinal);
@@ -109,45 +107,44 @@ public sealed class ActivePullRequestListCardTests
     [Fact]
     public void Overdue_pull_request_needing_approval_is_marked_and_a_recent_one_is_marked_for_review()
     {
-        var card = ActivePullRequestListCard.Create(
+        var card = Single(
             Subject with { Facts = Subject.Facts with { Reference = "!9" } },
-            [FakeAzDoClient.PullRequest(1, "Old") with { Created = Now.AddDays(-30) }, FakeAzDoClient.PullRequest(2, "Recent") with { Created = Now.AddDays(-1) }],
-            new Dictionary<int, AzDoCommentCount>(),
-            NoAnnouncements,
-            Now);
+            [FakeAzDoClient.PullRequest(2, "Recent") with { Created = Now.AddDays(-1) }, FakeAzDoClient.PullRequest(1, "Old") with { Created = Now.AddDays(-30) }],
+            NoAnnouncements);
 
-        Assert.StartsWith(ActivePullRequestListCard.OverdueMarker + " **!1**", Text(Block(card.Body[1]).Details[0]), StringComparison.Ordinal);
-        Assert.StartsWith(ActivePullRequestListCard.NeedsApprovalMarker + " **!2**", Text(Block(card.Body[2]).Details[0]), StringComparison.Ordinal);
+        Assert.StartsWith(ActivePullRequestListCard.NeedsApprovalMarker + " **!2**", Text(Block(card.Body[1]).Details[0]), StringComparison.Ordinal);
+        Assert.StartsWith(ActivePullRequestListCard.OverdueMarker + " **!1**", Text(Block(card.Body[2]).Details[0]), StringComparison.Ordinal);
     }
 
     [Fact]
     public void Announced_pull_request_shows_now_and_one_created_the_same_day_shows_its_date_with_no_age()
     {
         var earlier = Now.AddHours(-3);
-        var card = ActivePullRequestListCard.Create(
+        var card = Single(
             Subject,
             [FakeAzDoClient.PullRequest(1, "Earlier") with { Created = earlier }, FakeAzDoClient.PullRequest(2, "Announced") with { Created = Now.AddDays(-30) }],
-            new Dictionary<int, AzDoCommentCount>(),
-            NoAnnouncements,
-            Now);
+            NoAnnouncements);
 
-        Assert.Equal($"🧑 Jamal Hartnett · 📅 {CardStyle.LocalDate(earlier)} 🌿 Fabrikam · feature → main", FactsText(card.Body[1]));
-        Assert.Equal($"🧑 Jamal Hartnett · 📅 {ActivePullRequestListCard.Now} 🌿 Fabrikam · feature → main", FactsText(card.Body[2]));
+        Assert.Equal($"🧑 Jamal Hartnett 📅 {ActivePullRequestListCard.Now} 🌿 Fabrikam · feature → main", FactsText(card.Body[1]));
+        Assert.Equal($"🧑 Jamal Hartnett 📅 {CardStyle.LocalDate(earlier)} 🌿 Fabrikam · feature → main", FactsText(card.Body[2]));
     }
 
     [Fact]
-    public void Full_list_with_long_titles_stays_under_the_Teams_message_size_limit()
+    public void Every_card_of_a_full_list_with_long_titles_leaves_a_buffer_under_the_Teams_message_size_limit()
     {
         const int TeamsMessageLimitBytes = 28 * 1024;
+        const double MaxShareOfLimit = 0.8;
         var reviewers = new[] { new AzDoReviewer(@"[Fabrikam]\Code Reviewers", true, true, ["Ana Diaz", "Lee Park"]), new AzDoReviewer("Jamal Hartnett", false, false, []) };
         var reviewable = Enumerable.Range(1, ActivePullRequestListCard.MaxListed)
             .Select(i => FakeAzDoClient.PullRequest(i, new string('x', 400), false, reviewers) with { Created = DateTimeOffset.UnixEpoch })
             .ToList();
         var comments = reviewable.ToDictionary(pr => pr.Id, _ => new AzDoCommentCount(3, 10));
 
-        var json = System.Text.Json.JsonSerializer.Serialize(ActivePullRequestListCard.Create(Subject, reviewable, comments, NoAnnouncements, Now), LightkeeperJson.Options);
+        var cards = ActivePullRequestListCard.Create(Subject with { Facts = Subject.Facts with { Reference = "!1" } }, reviewable, comments, NoAnnouncements, Now);
+        var largest = cards.Max(card => System.Text.Encoding.UTF8.GetByteCount(Json(card)));
 
-        Assert.True(System.Text.Encoding.UTF8.GetByteCount(json) < TeamsMessageLimitBytes, $"{System.Text.Encoding.UTF8.GetByteCount(json)} bytes");
+        Assert.Equal(ActivePullRequestListCard.MaxCards, cards.Count);
+        Assert.True(largest < TeamsMessageLimitBytes * MaxShareOfLimit, $"{largest} bytes");
     }
 
     [Theory]
@@ -156,7 +153,7 @@ public sealed class ActivePullRequestListCardTests
     public void Long_titles_are_cut_with_an_ellipsis(int length, bool cut)
     {
         var title = new string('x', length);
-        var card = ActivePullRequestListCard.Create(Subject, [FakeAzDoClient.PullRequest(1, title)], new Dictionary<int, AzDoCommentCount>(), NoAnnouncements, Now);
+        var card = Single(Subject, [FakeAzDoClient.PullRequest(1, title)], NoAnnouncements);
 
         var shown = CardStyle.Truncate(title, ActivePullRequestListCard.MaxTitleChars);
         Assert.Equal(cut, shown.EndsWith('…'));
@@ -176,20 +173,40 @@ public sealed class ActivePullRequestListCardTests
             [FakeAzDoClient.PullRequest(1, "Draft published yesterday") with { Created = Now.AddDays(-40) }, FakeAzDoClient.PullRequest(2, "Ready when created") with { Created = Now.AddDays(-5) }],
             announcedAt);
 
-        var card = ActivePullRequestListCard.Create(Subject with { Facts = Subject.Facts with { Reference = "!9" } }, reviewable, new Dictionary<int, AzDoCommentCount>(), announcedAt, Now);
+        var card = Single(Subject with { Facts = Subject.Facts with { Reference = "!9" } }, reviewable, announcedAt);
 
-        Assert.Equal([2, 1], reviewable.Select(pr => pr.Id));
-        Assert.Equal($"🧑 Jamal Hartnett · 📅 {CardStyle.LocalDate(published)} (1d) 🌿 Fabrikam · feature → main", FactsText(card.Body[2]));
+        Assert.Equal([1, 2], reviewable.Select(pr => pr.Id));
+        Assert.Equal($"🧑 Jamal Hartnett 📅 {CardStyle.LocalDate(published)} (1d) 🌿 Fabrikam · feature → main", FactsText(card.Body[1]));
     }
 
     [Fact]
-    public void Announced_pull_request_is_last_even_when_created_before_the_others()
+    public void Announced_pull_request_is_first_even_when_created_before_the_others()
     {
         var reviewable = Enumerable.Range(1, 4).Select(i => FakeAzDoClient.PullRequest(i, "PR")).ToList();
 
-        var shown = ActivePullRequestListCard.Shown(reviewable, PullRequestCardFormatter.Reference(2));
+        var shown = ActivePullRequestListCard.Shown(reviewable, PullRequestCardFormatter.Reference(3));
 
-        Assert.Equal([1, 3, 4, 2], shown.Select(pr => pr.Id));
+        Assert.Equal([3, 1, 2, 4], shown.Select(pr => pr.Id));
+    }
+
+    [Fact]
+    public void List_is_split_into_numbered_cards_with_the_announced_pull_request_button_in_the_header_after_the_first()
+    {
+        var count = ActivePullRequestListCard.RowsPerCard * 2 + 1;
+        var reviewable = Enumerable.Range(1, count).Select(i => FakeAzDoClient.PullRequest(i, "PR")).ToList();
+
+        var cards = ActivePullRequestListCard.Create(Subject, reviewable, new Dictionary<int, AzDoCommentCount>(), NoAnnouncements, Now);
+
+        Assert.Equal([ActivePullRequestListCard.RowsPerCard, ActivePullRequestListCard.RowsPerCard, 1], cards.Select(c => c.Body.Count - 1));
+        Assert.Equal(
+            [$"{count} active pull requests (1 of 3)", $"{count} active pull requests (2 of 3)", $"{count} active pull requests (3 of 3)"],
+            cards.Select(c => c.FallbackText.Split(':')[0]));
+        Assert.StartsWith(ActivePullRequestListCard.AnnouncedMarker + " **!2**", Text(Block(cards[0].Body[1]).Details[0]), StringComparison.Ordinal);
+        Assert.DoesNotContain(ActivePullRequestListCard.ReviewButtonName, Json(cards[0].Body[0]), StringComparison.Ordinal);
+        Assert.All(cards.Skip(1), card => Assert.Contains(
+            $"\"title\":\"{ActivePullRequestListCard.ReviewButtonName}\",\"url\":\"https://dev.azure.com/fabrikam/Fabrikam/_git/Fabrikam/pullrequest/2\"",
+            Json(card.Body[0]),
+            StringComparison.Ordinal));
     }
 
     [Fact]
@@ -200,11 +217,12 @@ public sealed class ActivePullRequestListCardTests
         var subject = Subject with { Facts = Subject.Facts with { Reference = PullRequestCardFormatter.Reference(count) } };
 
         var shown = ActivePullRequestListCard.Shown(reviewable, subject.Facts.Reference);
-        var card = ActivePullRequestListCard.Create(subject, reviewable, new Dictionary<int, AzDoCommentCount>(), NoAnnouncements, Now);
+        var cards = ActivePullRequestListCard.Create(subject, reviewable, new Dictionary<int, AzDoCommentCount>(), NoAnnouncements, Now);
 
         Assert.Equal(ActivePullRequestListCard.MaxListed, shown.Count);
-        Assert.Equal(count, shown[^1].Id);
-        Assert.Equal("…and 3 more", Text(card.Body[^1]));
+        Assert.Equal(count, shown[0].Id);
+        Assert.Equal(ActivePullRequestListCard.MaxCards, cards.Count);
+        Assert.Equal("…and 3 more", Text(cards[^1].Body[^1]));
     }
 
     [Theory]
@@ -212,7 +230,7 @@ public sealed class ActivePullRequestListCardTests
     [InlineData(2, 2, " 2/2", "good")]
     public void Comments_show_resolved_of_total_with_a_green_check_when_all_are_resolved_and_red_otherwise(int resolved, int total, string expected, string? color)
     {
-        var run = Assert.Single(ActivePullRequestListCard.CommentsLine(new AzDoCommentCount(resolved, total), hasConflicts: false)!.Inlines);
+        var run = Assert.Single(Inlines(ActivePullRequestListCard.CommentsLine(new AzDoCommentCount(resolved, total), hasConflicts: false)!));
 
         Assert.Equal(ActivePullRequestListCard.CommentsMarker + expected + ActivePullRequestListCard.CommentsSuffix, run.Text);
         Assert.Equal(color, run.Color);
@@ -221,8 +239,8 @@ public sealed class ActivePullRequestListCardTests
     [Fact]
     public void Merge_conflicts_show_in_red_after_the_comment_count_or_alone()
     {
-        var withComments = ActivePullRequestListCard.CommentsLine(new AzDoCommentCount(2, 2), hasConflicts: true)!.Inlines;
-        var alone = Assert.Single(ActivePullRequestListCard.CommentsLine(null, hasConflicts: true)!.Inlines);
+        var withComments = Inlines(ActivePullRequestListCard.CommentsLine(new AzDoCommentCount(2, 2), hasConflicts: true)!);
+        var alone = Assert.Single(Inlines(ActivePullRequestListCard.CommentsLine(null, hasConflicts: true)!));
 
         Assert.Equal($"{ActivePullRequestListCard.CommentsMarker} 2/2{ActivePullRequestListCard.CommentsSuffix} · {ActivePullRequestListCard.ConflictsText}", string.Concat(withComments.Select(r => r.Text)));
         Assert.Equal((ActivePullRequestListCard.ConflictsText, CardStyle.Failure.TextColor), (withComments[^1].Text, withComments[^1].Color));
@@ -249,11 +267,26 @@ public sealed class ActivePullRequestListCardTests
     /// <summary>Stands in for a run's color when it is subtle rather than colored.</summary>
     private const string Subtle = "subtle";
 
-    /// <summary>Each run's text with its color, <see cref="Subtle"/>, or null for the default color.</summary>
-    private static (string Text, string? Color)[] Colors(AdaptiveElement element) =>
-        [.. Assert.IsType<AdaptiveRichTextBlock>(element).Inlines.Select(r => (r.Text, r.IsSubtle == true ? Subtle : r.Color))];
+    /// <summary>The one card for a list short enough to need only one.</summary>
+    private static AdaptiveCard Single(NotificationSubject subject, IReadOnlyList<AzDoPullRequest> reviewable, IReadOnlyDictionary<int, DateTimeOffset> announcedAt) =>
+        Assert.Single(ActivePullRequestListCard.Create(subject, reviewable, new Dictionary<int, AzDoCommentCount>(), announcedAt, Now));
 
-    private static string RichText(AdaptiveElement element) => string.Concat(Assert.IsType<AdaptiveRichTextBlock>(element).Inlines.Select(r => r.Text));
+    private static string Json(object value) => System.Text.Json.JsonSerializer.Serialize(value, value.GetType(), LightkeeperJson.Options);
+
+    /// <summary>A detail line's runs, after checking its subtle bullet sits in its own column so wrapped text stays indented.</summary>
+    private static IReadOnlyList<AdaptiveTextRun> Inlines(AdaptiveElement line)
+    {
+        var columns = Assert.IsType<AdaptiveColumnSet>(line).Columns;
+        Assert.Equal(2, columns.Count);
+        var bullet = Assert.IsType<AdaptiveTextBlock>(Assert.Single(columns[0].Items));
+        Assert.Equal((ActivePullRequestListCard.ListBullet, true, CardStyle.RightAlignment), (bullet.Text, bullet.IsSubtle == true, bullet.HorizontalAlignment));
+        return Assert.IsType<AdaptiveRichTextBlock>(Assert.Single(columns[1].Items)).Inlines;
+    }
+
+    /// <summary>Each run's text with its color, <see cref="Subtle"/>, or null for the default color.</summary>
+    private static (string Text, string? Color)[] Colors(AdaptiveElement line) => [.. Inlines(line).Select(r => (r.Text, r.IsSubtle == true ? Subtle : r.Color))];
+
+    private static string RichText(AdaptiveElement line) => string.Concat(Inlines(line).Select(r => r.Text));
 
     private static string FactsText(AdaptiveElement block) => RichText(Block(block).Details[1]);
 

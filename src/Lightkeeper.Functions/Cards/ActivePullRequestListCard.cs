@@ -6,7 +6,8 @@ namespace Lightkeeper.Functions.Cards;
 
 /// <summary>
 /// What an <see cref="NotificationType.ActiveList"/> rule posts instead of the pull request card: the project's active pull requests that are not drafts,
-/// oldest first, one block each, with the one being announced starred and last. Blocks rather than a table, so the card reads at any width.
+/// the one being announced starred and first, then the others newest first, one block each, over as many cards as <see cref="RowsPerCard"/> needs.
+/// Blocks rather than a table, so a card reads at any width.
 /// </summary>
 public static class ActivePullRequestListCard
 {
@@ -40,17 +41,36 @@ public static class ActivePullRequestListCard
     public const string ConflictsText = "Merge conflicts";
     public const string RequiredReviewersPrefix = "Required: ";
 
-    /// <summary>Keeps the card under the Teams message size limit; each row also costs one comment thread lookup.</summary>
-    public const int MaxListed = 15;
+    /// <summary>Pull requests per card: about 70% of the Teams message size limit with every row at its largest, so each card is a comfortable read.</summary>
+    public const int RowsPerCard = 8;
+
+    /// <summary>Cards posted for one announcement at most; the last ends with a count of the pull requests left out.</summary>
+    public const int MaxCards = 5;
+
+    /// <summary>Each listed pull request also costs one comment thread lookup.</summary>
+    public const int MaxListed = RowsPerCard * MaxCards;
 
     /// <summary>Longer titles end in an ellipsis, so a title fits one line beside its markers in a typical Teams width and bounds the card's size.</summary>
     public const int MaxTitleChars = 70;
 
     private const string ItemSeparator = " · ";
+
+    /// <summary>
+    /// In its own column in front of each line under a pull request's title, so a wrapped line stays indented past it; a rich text line cannot be a markdown
+    /// list item and keep its colors.
+    /// </summary>
+    public const string ListBullet = "▸";
     private const string Space = " ";
     private const string AgeSeparator = ", ";
     private const string BranchArrow = " → ";
     private const string NameSeparator = ", ";
+
+    /// <summary>
+    /// The bullet is right-aligned in a column this wide, indenting it under the title, and its line starts right after with no column gap: the bullet
+    /// character's own side spacing separates them. Column widths take exact pixels; gaps only take named sizes.
+    /// </summary>
+    private const string BulletColumnWidth = "18px";
+    private const string BulletGap = "None";
     private const string OpenParenthesis = "(";
     private const string CloseParenthesis = ")";
     private const char GroupScopeSeparator = '\\';
@@ -62,10 +82,10 @@ public static class ActivePullRequestListCard
     private static readonly string ReadyColor = CardStyle.Review.TextColor;
     private static readonly string RepositoryColor = CardStyle.Success.TextColor;
 
-    /// <summary>Active pull requests worth reviewing, oldest <see cref="ReadySince"/> first: drafts are left out.</summary>
+    /// <summary>Active pull requests worth reviewing, newest <see cref="ReadySince"/> first: drafts are left out.</summary>
     /// <param name="announcedAt">When each pull request was announced, by ID.</param>
     public static IReadOnlyList<AzDoPullRequest> Reviewable(IReadOnlyList<AzDoPullRequest> pullRequests, IReadOnlyDictionary<int, DateTimeOffset> announcedAt) =>
-        [.. pullRequests.Where(pr => !pr.IsDraft).OrderBy(pr => ReadySince(pr, announcedAt) ?? DateTimeOffset.MaxValue).ThenBy(pr => pr.Id)];
+        [.. pullRequests.Where(pr => !pr.IsDraft).OrderByDescending(pr => ReadySince(pr, announcedAt) ?? DateTimeOffset.MinValue).ThenByDescending(pr => pr.Id)];
 
     /// <summary>
     /// When the pull request became ready for review: when it was announced, since a draft is announced only once published; otherwise, such as for one
@@ -75,20 +95,25 @@ public static class ActivePullRequestListCard
         announcedAt.TryGetValue(pr.Id, out var announced) ? announced : pr.Created;
 
     /// <summary>
-    /// The rows the card shows, at most <see cref="MaxListed"/>: the others oldest first, then the announced pull request last, since it has only just become
-    /// ready for review even when it was created earlier as a draft.
+    /// The rows the cards show, at most <see cref="MaxListed"/>: the announced pull request first, since it has only just become ready for review even when it
+    /// was created earlier as a draft, then the others in <see cref="Reviewable"/> order.
     /// </summary>
     public static IReadOnlyList<AzDoPullRequest> Shown(IReadOnlyList<AzDoPullRequest> reviewable, string? announcedReference)
     {
         if (reviewable.FirstOrDefault(pr => IsAnnounced(pr, announcedReference)) is not { } announced) return [.. reviewable.Take(MaxListed)];
-        return [.. reviewable.Where(pr => pr != announced).Take(MaxListed - 1), announced];
+        return [announced, .. reviewable.Where(pr => pr != announced).Take(MaxListed - 1)];
     }
 
+    /// <summary>
+    /// The <see cref="Shown"/> rows split into cards of <see cref="RowsPerCard"/>, posted in order. Every card's header counts all reviewable pull requests and,
+    /// when there is more than one card, which card it is; cards after the first, which do not list the announced pull request, have its
+    /// <see cref="ReviewButtonName"/> button in the header.
+    /// </summary>
     /// <param name="reviewable">From <see cref="Reviewable"/>.</param>
     /// <param name="comments">Comment counts by pull request ID; a pull request without one shows no comment line.</param>
     /// <param name="announcedAt">When each pull request was announced, by ID; see <see cref="ReadySince"/>.</param>
     /// <param name="now">What each pull request's age is measured to.</param>
-    public static AdaptiveCard Create(
+    public static IReadOnlyList<AdaptiveCard> Create(
         NotificationSubject subject,
         IReadOnlyList<AzDoPullRequest> reviewable,
         IReadOnlyDictionary<int, AzDoCommentCount> comments,
@@ -98,34 +123,42 @@ public static class ActivePullRequestListCard
         var reference = subject.Facts.Reference;
         var announced = reviewable.FirstOrDefault(pr => IsAnnounced(pr, reference));
         var shown = Shown(reviewable, reference);
-        var title = Title(reviewable.Count);
         var subtitle = $"{PullRequestCardFormatter.ReadyForReview}: {reference} {(announced is null ? null : ShownTitle(announced))}".TrimEnd();
+        var pages = shown.Chunk(RowsPerCard).DefaultIfEmpty([]).ToList();
 
-        List<AdaptiveElement> body =
-        [
-            CardStyle.Header(CardStyle.Review, title, subtitle),
-            .. shown.Select(pr => Block(pr, comments.GetValueOrDefault(pr.Id), ReadySince(pr, announcedAt), pr == announced, now)),
-        ];
-        if (reviewable.Count > shown.Count)
+        return [.. pages.Select((rows, index) =>
         {
-            body.Add(new AdaptiveTextBlock(string.Create(CultureInfo.InvariantCulture, $"…and {reviewable.Count - shown.Count} more")) { IsSubtle = true });
-        }
+            var title = Title(reviewable.Count, index + 1, pages.Count);
+            var links = index > 0 && announced is not null ? [ReviewButton(announced)] : (IReadOnlyList<AdaptiveOpenUrlAction>)[];
+            List<AdaptiveElement> body =
+            [
+                CardStyle.Header(CardStyle.Review, title, subtitle, links: links),
+                .. rows.Select(pr => Block(pr, comments.GetValueOrDefault(pr.Id), ReadySince(pr, announcedAt), pr == announced, now)),
+            ];
+            if (index == pages.Count - 1 && reviewable.Count > shown.Count)
+            {
+                body.Add(new AdaptiveTextBlock(string.Create(CultureInfo.InvariantCulture, $"…and {reviewable.Count - shown.Count} more")) { IsSubtle = true });
+            }
 
-        return new AdaptiveCard
-        {
-            FallbackText = $"{title}: {subtitle}",
-            Body = body,
-        };
+            return new AdaptiveCard { FallbackText = $"{title}: {subtitle}", Body = body };
+        })];
     }
 
-    internal static string Title(int count) => count == 1 ? "1 active pull request" : string.Create(CultureInfo.InvariantCulture, $"{count} active pull requests");
+    /// <summary>Such as <c>15 active pull requests (1 of 2)</c>; no card number when there is only one card.</summary>
+    internal static string Title(int count, int card = 1, int cards = 1)
+    {
+        var total = count == 1 ? "1 active pull request" : string.Create(CultureInfo.InvariantCulture, $"{count} active pull requests");
+        return cards == 1 ? total : string.Create(CultureInfo.InvariantCulture, $"{total} ({card} of {cards})");
+    }
+
+    private static AdaptiveOpenUrlAction ReviewButton(AzDoPullRequest pr) => new(ReviewButtonName, pr.WebUrl.AbsoluteUri);
 
     /// <summary>
     /// Resolved out of total comment threads, such as <c>✔ 2/2 comments resolved</c>, green when all are resolved and red otherwise, then
     /// <see cref="ConflictsText"/> in red when the pull request has merge conflicts; null when there is neither.
     /// </summary>
     /// <param name="count">Null or zero total shows no comment count.</param>
-    internal static AdaptiveRichTextBlock? CommentsLine(AzDoCommentCount? count, bool hasConflicts)
+    internal static AdaptiveColumnSet? CommentsLine(AzDoCommentCount? count, bool hasConflicts)
     {
         var comments = count is { Total: > 0 }
             ? Value(string.Create(CultureInfo.InvariantCulture, $"{CommentsMarker} {count.Resolved}/{count.Total}{CommentsSuffix}"),
@@ -150,7 +183,7 @@ public static class ActivePullRequestListCard
     }
 
     /// <summary><see cref="RequiredReviewersPrefix"/>, then each <see cref="Reviewer"/> separated by commas, with the label and commas subtle.</summary>
-    internal static AdaptiveRichTextBlock RequiredReviewersLine(IReadOnlyList<AzDoReviewer> reviewers) =>
+    internal static AdaptiveColumnSet RequiredReviewersLine(IReadOnlyList<AzDoReviewer> reviewers) =>
         Line([Punctuation(RequiredReviewersPrefix), .. reviewers.SelectMany((r, i) => i == 0 ? Reviewer(r) : [Punctuation(NameSeparator), .. Reviewer(r)])]);
 
     /// <summary>Whole calendar years, months, and days from ready for review to now, and the business days between, counted in UTC.</summary>
@@ -227,7 +260,7 @@ public static class ActivePullRequestListCard
         if (CommentsLine(comments, pr.HasConflicts) is { } commentLine) details.Add(commentLine);
         if (pr.RequiredReviewers.Count > 0) details.Add(RequiredReviewersLine(pr.RequiredReviewers));
 
-        var review = new AdaptiveColumn([new AdaptiveActionSet([new AdaptiveOpenUrlAction(ReviewButtonName, pr.WebUrl.AbsoluteUri)])], AdaptiveColumn.Auto)
+        var review = new AdaptiveColumn([new AdaptiveActionSet([ReviewButton(pr)])], AdaptiveColumn.Auto)
         {
             VerticalContentAlignment = "Top",
         };
@@ -238,29 +271,28 @@ public static class ActivePullRequestListCard
     }
 
     /// <summary>
-    /// One wrapping line, such as <c>🧑 Josh Jung · 📅 Fri, Apr 24, 2026 (7M) 🌿 repo · source → target</c>: the author in <see cref="CardStyle.PersonColor"/>,
-    /// the date and age in <see cref="ReadyColor"/> (the age in red when overdue), the repository and branches in <see cref="RepositoryColor"/>, and the dots,
-    /// parentheses, and arrow subtle.
+    /// One wrapping line, such as <c>🧑 Josh Jung 📅 Fri, Apr 24, 2026 (7M) 🌿 repo · source → target</c>: the author in <see cref="CardStyle.PersonColor"/>,
+    /// the date and age in <see cref="ReadyColor"/> (the age in red when overdue), the repository and branches in <see cref="RepositoryColor"/>, and the dot,
+    /// parentheses, and arrow subtle. Only spaces separate the author, date, and repository, since their colors already set them apart.
     /// The pull request being announced shows <c>📅 Now</c> with no age; one ready since earlier the same day shows its date with no age.
     /// </summary>
     /// <param name="age">From <see cref="Block"/>; null for the one being announced.</param>
-    private static AdaptiveRichTextBlock FactsLine(AzDoPullRequest pr, DateTimeOffset? readySince, bool isAnnounced, Age? age)
+    private static AdaptiveColumnSet FactsLine(AzDoPullRequest pr, DateTimeOffset? readySince, bool isAnnounced, Age? age)
     {
         var when = isAnnounced ? Now : readySince is { } date ? CardStyle.LocalDate(date) : null;
-        List<AdaptiveTextRun> runs =
-        [
-            .. Interleave(ItemSeparator, pr.Author is { } author ? Value($"{CardStyle.PersonMarker} {author}", CardStyle.PersonColor) : null, when is null ? null : Value($"{ReadyMarker} {when}", ReadyColor)),
-            Punctuation(Space),
-        ];
+        List<AdaptiveTextRun> ready = when is null ? [] : [Value($"{ReadyMarker} {when}", ReadyColor)];
         if (age is { TotalDays: > 0 } shownAge)
         {
-            runs.AddRange([Punctuation(OpenParenthesis), Value(shownAge.ToString(), shownAge.IsOverdue ? AlertColor : ReadyColor), Punctuation(CloseParenthesis + Space)]);
+            ready.AddRange([Punctuation(Space + OpenParenthesis), Value(shownAge.ToString(), shownAge.IsOverdue ? AlertColor : ReadyColor), Punctuation(CloseParenthesis)]);
         }
 
-        var branches = Interleave(BranchArrow, new[] { pr.SourceRefName, pr.TargetRefName }.OfType<string>().Select(b => Value(CardStyle.Branch(b), RepositoryColor))).ToList();
-        runs.Add(Value($"{RepositoryMarker} {pr.Repository}", RepositoryColor));
-        if (branches.Count > 0) runs.AddRange([Punctuation(ItemSeparator), .. branches]);
-        return Line(runs);
+        IReadOnlyList<AdaptiveTextRun> branches =
+            [.. Interleave(BranchArrow, new[] { pr.SourceRefName, pr.TargetRefName }.OfType<string>().Select(b => Value(CardStyle.Branch(b), RepositoryColor)))];
+        return Line(Interleave(
+            Space,
+            pr.Author is { } author ? [Value($"{CardStyle.PersonMarker} {author}", CardStyle.PersonColor)] : [],
+            ready,
+            [.. Interleave(ItemSeparator, [Value($"{RepositoryMarker} {pr.Repository}", RepositoryColor)], branches)]));
     }
 
     /// <summary>A value in <paramref name="color"/>, or the default color when null.</summary>
@@ -271,10 +303,17 @@ public static class ActivePullRequestListCard
 
     /// <summary>The values that are present, with a subtle <paramref name="separator"/> between each.</summary>
     private static IEnumerable<AdaptiveTextRun> Interleave(string separator, params IEnumerable<AdaptiveTextRun?> values) =>
-        values.OfType<AdaptiveTextRun>().SelectMany((value, i) => i == 0 ? [value] : new[] { Punctuation(separator), value });
+        Interleave(separator, values.OfType<AdaptiveTextRun>().Select(value => (IReadOnlyList<AdaptiveTextRun>)[value]));
 
-    /// <summary>One detail line under the title; neighboring runs formatted alike are merged, since each run adds to the card's size.</summary>
-    private static AdaptiveRichTextBlock Line(IEnumerable<AdaptiveTextRun> runs)
+    /// <summary>The groups that have runs, with a subtle <paramref name="separator"/> between each.</summary>
+    private static IEnumerable<AdaptiveTextRun> Interleave(string separator, params IEnumerable<IReadOnlyList<AdaptiveTextRun>> groups) =>
+        groups.Where(group => group.Count > 0).SelectMany((group, i) => i == 0 ? group : group.Prepend(Punctuation(separator)));
+
+    /// <summary>
+    /// One detail line under the title: a subtle <see cref="ListBullet"/> indented in its own narrow column, so the runs wrap indented past it. Neighboring runs
+    /// formatted alike are merged, since each run adds to the card's size.
+    /// </summary>
+    private static AdaptiveColumnSet Line(IEnumerable<AdaptiveTextRun> runs)
     {
         List<AdaptiveTextRun> merged = [];
         foreach (var run in runs)
@@ -283,7 +322,14 @@ public static class ActivePullRequestListCard
             else merged.Add(run);
         }
 
-        return new AdaptiveRichTextBlock(merged) { Spacing = "None" };
+        return new AdaptiveColumnSet(
+        [
+            new AdaptiveColumn([new AdaptiveTextBlock(ListBullet) { IsSubtle = true, HorizontalAlignment = CardStyle.RightAlignment }], BulletColumnWidth),
+            new AdaptiveColumn([new AdaptiveRichTextBlock(merged)], AdaptiveColumn.Stretch) { Spacing = BulletGap },
+        ])
+        {
+            Spacing = "None",
+        };
     }
 
     /// <summary>The title cut to <see cref="MaxTitleChars"/>, wherever the card shows it.</summary>

@@ -25,7 +25,7 @@ public static class CardStyle
     public static readonly string PersonColor = Warning.TextColor;
 
     private const string Ellipsis = "…";
-    private const string RightAlignment = "Right";
+    internal const string RightAlignment = "Right";
     private const string ButtonSpacing = "Small";
     private static readonly char[] MarkdownBlockMarkers = ['#', '>'];
 

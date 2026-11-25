@@ -44,6 +44,7 @@ public sealed record AdaptiveTextBlock(string Text) : AdaptiveElement
     public bool? IsSubtle { get; init; }
     public bool Wrap { get; init; } = true;
     public string? Spacing { get; init; }
+    public string? HorizontalAlignment { get; init; }
 }
 
 /// <param name="Style">Background style: <c>good</c>, <c>warning</c>, <c>attention</c>, or <c>emphasis</c>.</param>
@@ -71,6 +72,9 @@ public sealed record AdaptiveColumn(IReadOnlyList<AdaptiveElement> Items, string
 
     public string Type { get; } = "Column";
     public string? VerticalContentAlignment { get; init; }
+
+    /// <summary>The gap before this column: <c>None</c>, <c>Small</c>, <c>Default</c>, and larger.</summary>
+    public string? Spacing { get; init; }
 }
 
 /// <summary>One wrapping paragraph whose runs can each have their own color, unlike a text block, which has one color throughout.</summary>

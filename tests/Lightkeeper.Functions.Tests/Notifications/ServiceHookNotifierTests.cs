@@ -227,6 +227,33 @@ public sealed class ServiceHookNotifierTests
     }
 
     [Fact]
+    public async Task Active_list_over_several_cards_submits_them_in_order()
+    {
+        _store.Rules.Add(Rule("pr-list", 10, RuleAction.Include, trigger: "git.pullrequest.*", notificationType: NotificationType.ActiveList));
+        _azDo.Result = new(AzDoResultStatus.Succeeded, [.. Enumerable.Range(1, ActivePullRequestListCard.RowsPerCard + 1).Select(i => FakeAzDoClient.PullRequest(i, "PR"))]);
+
+        var result = await Notify(Samples.Read(Samples.PullRequestCreated));
+
+        Assert.Equal(NotificationOutcome.WorkflowAccepted, result.Outcome);
+        Assert.Equal([1, 2], _workflow.Submissions.Select(s => s.Card.FallbackText.Contains("(1 of 2)", StringComparison.Ordinal) ? 1 : 2));
+        Assert.Contains("accepted all 2 cards", result.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Active_list_stops_at_the_first_card_the_workflow_does_not_accept()
+    {
+        _workflow.RespondAfter(1, new WorkflowSubmission(WorkflowSubmissionStatus.Rejected, 400));
+        _store.Rules.Add(Rule("pr-list", 10, RuleAction.Include, trigger: "git.pullrequest.*", notificationType: NotificationType.ActiveList));
+        _azDo.Result = new(AzDoResultStatus.Succeeded, [.. Enumerable.Range(1, ActivePullRequestListCard.RowsPerCard * 2 + 1).Select(i => FakeAzDoClient.PullRequest(i, "PR"))]);
+
+        var result = await Notify(Samples.Read(Samples.PullRequestCreated));
+
+        Assert.Equal(NotificationOutcome.WorkflowRejected, result.Outcome);
+        Assert.Equal(2, _workflow.Submissions.Count);
+        Assert.Contains("rejected card 2 of 3 (HTTP 400)", result.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Active_list_orders_and_dates_pull_requests_by_when_they_became_ready_for_review()
     {
         var published = new DateTimeOffset(2026, 11, 20, 15, 0, 0, TimeSpan.Zero);
@@ -242,9 +269,10 @@ public sealed class ServiceHookNotifierTests
         await Notify(Samples.Read(Samples.PullRequestCreated));
 
         var blocks = Assert.Single(_workflow.Submissions).Card.Body.OfType<AdaptiveContainer>().Where(c => c.Items is [AdaptiveTextBlock, AdaptiveColumnSet]).ToList();
-        Assert.Equal(["!3", "!2", "!1"], blocks.Select(b => ((AdaptiveTextBlock)b.Items[0]).Text.Split("**")[1]));
-        var facts = ((AdaptiveRichTextBlock)((AdaptiveColumnSet)blocks[1].Items[1]).Columns[0].Items[0]).Inlines;
-        Assert.StartsWith($"🧑 Jamal Hartnett · 📅 {CardStyle.LocalDate(published)}", string.Concat(facts.Select(r => r.Text)), StringComparison.Ordinal);
+        Assert.Equal(["!1", "!2", "!3"], blocks.Select(b => ((AdaptiveTextBlock)b.Items[0]).Text.Split("**")[1]));
+        var factsLine = (AdaptiveColumnSet)((AdaptiveColumnSet)blocks[1].Items[1]).Columns[0].Items[0];
+        var facts = ((AdaptiveRichTextBlock)factsLine.Columns[1].Items[0]).Inlines;
+        Assert.StartsWith($"🧑 Jamal Hartnett 📅 {CardStyle.LocalDate(published)}", string.Concat(facts.Select(r => r.Text)), StringComparison.Ordinal);
     }
 
     [Fact]

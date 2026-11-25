@@ -39,8 +39,11 @@ public enum RoutingDecision
     NotifyActiveListUnavailable,
 }
 
-/// <param name="StatusCode">HTTP status the workflow returned, when it answered.</param>
-public sealed record WorkflowDelivery(string WorkflowId, NotificationOutcome Outcome, int? StatusCode);
+/// <param name="Outcome">The last card's outcome: accepted only when every card was.</param>
+/// <param name="StatusCode">HTTP status the workflow returned for the last card, when it answered.</param>
+/// <param name="CardCount">Cards meant for the workflow; more than one for an active pull request list over several cards.</param>
+/// <param name="CardsAccepted">Cards the workflow accepted before the first it did not.</param>
+public sealed record WorkflowDelivery(string WorkflowId, NotificationOutcome Outcome, int? StatusCode, int CardCount = 1, int CardsAccepted = 0);
 
 /// <summary>What Lightkeeper knew and decided about one request; the source of its <c>NotificationLog</c> row.</summary>
 /// <param name="SkipReason">Why the event was not worth a card, for <see cref="RoutingDecision.SkipByEvent"/>.</param>
