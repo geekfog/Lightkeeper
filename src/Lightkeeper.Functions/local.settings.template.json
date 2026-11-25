@@ -1,0 +1,14 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "TeamsWorkflow__FallbackWebhookUrl": "",
+    "TeamsWorkflow__Timeout": "00:00:15",
+    "NotificationLog__RetentionDays": "90",
+    "AzDo__PersonalAccessToken": "",
+    "AzDo__Timeout": "00:00:30",
+    "KeyVault__Uri": "",
+    "APPLICATIONINSIGHTS_CONNECTION_STRING": ""
+  }
+}

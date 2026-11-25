@@ -1,0 +1,85 @@
+# Release stage template, included by azure-pipelines.yaml once per environment. Never run directly.
+parameters:
+  - name: p_publishEnvironment
+    type: string
+  - name: p_dependsOn
+    type: string
+  - name: p_hasMetCondition
+    type: string
+
+stages:
+  - stage: Release_${{ parameters.p_publishEnvironment }}
+    displayName: Release ${{ parameters.p_publishEnvironment }}
+    dependsOn: ${{ parameters.p_dependsOn }}
+    condition: ${{ parameters.p_hasMetCondition }}
+    variables:
+      - group: lightkeeper-${{ lower(parameters.p_publishEnvironment) }}-vars
+    jobs:
+      - deployment: Release
+        environment: Lightkeeper ${{ parameters.p_publishEnvironment }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  displayName: Deploy infrastructure
+                  inputs:
+                    azureSubscription: $(a_AzureServiceConnection)
+                    scriptType: pscore
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      $ErrorActionPreference = 'Stop'
+                      $PSNativeCommandUseErrorActionPreference = $true
+                      az account set --subscription '$(a_AzureSubscriptionId)'
+
+                      # Optional a_KeyVaultSecretsOfficers: Entra ID users (sign-in names or object IDs) separated by ';'. Sign-in names need directory read access.
+                      $v_SecretsOfficerIds = @(($env:A_KEYVAULTSECRETSOFFICERS ?? '') -split ';' | ForEach-Object -MemberName Trim | Where-Object { $_ } | ForEach-Object {
+                        if ([guid]::TryParse($_, [ref][guid]::Empty)) { $_ } else { az ad user show --id $_ --query id --output tsv }
+                      })
+
+                      $v_ParametersFile = '$(Pipeline.Workspace)/$(g_InfraArtifact)/parameters.json'
+                      @{
+                        '$schema'      = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+                        contentVersion = '1.0.0.0'
+                        parameters     = @{
+                          p_AppBase     = @{ value = '$(a_AppBase)' }
+                          p_Environment = @{ value = '${{ parameters.p_publishEnvironment }}' }
+                          p_Region      = @{ value = '$(a_Region)' }
+                          p_Location    = @{ value = '$(a_Location)' }
+                          p_KeyVaultSecretsOfficerIds = @{ value = $v_SecretsOfficerIds }
+                          p_Tags        = @{ value = @{
+                            Product     = '$(a_AppBase) Function'
+                            Environment = '${{ parameters.p_publishEnvironment }}'
+                            CreatedBy   = 'Azure DevOps'
+                          }}
+                        }
+                      } | ConvertTo-Json -Depth 5 | Set-Content $v_ParametersFile
+
+                      $v_Outputs = az deployment sub create `
+                        --location '$(a_Location)' `
+                        --name 'lightkeeper-${{ lower(parameters.p_publishEnvironment) }}-$(Build.BuildNumber)' `
+                        --template-file '$(Pipeline.Workspace)/$(g_InfraArtifact)/main.bicep' `
+                        --parameters "@$v_ParametersFile" "p_TeamsWorkflowFallbackWebhookUrl=$env:LIGHTKEEPER_TEAMS_WORKFLOW_FALLBACK_URL" `
+                        --query properties.outputs --output json | ConvertFrom-Json
+
+                      Write-Host "##vso[task.setvariable variable=o_ResourceGroupName]$($v_Outputs.o_ResourceGroupName.value)"
+                      Write-Host "##vso[task.setvariable variable=o_FunctionAppName]$($v_Outputs.o_FunctionAppName.value)"
+                      Write-Host "Key Vault: $($v_Outputs.o_KeyVaultName.value)"
+                      Write-Host "Function endpoint: https://$($v_Outputs.o_FunctionAppHostName.value)/api/service-hooks/azure-devops"
+                  env:
+                    LIGHTKEEPER_TEAMS_WORKFLOW_FALLBACK_URL: $(a_TeamsWorkflowFallbackWebhookUrl)
+
+                - task: AzureCLI@2
+                  displayName: Deploy function app
+                  inputs:
+                    azureSubscription: $(a_AzureServiceConnection)
+                    scriptType: pscore
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      $ErrorActionPreference = 'Stop'
+                      $PSNativeCommandUseErrorActionPreference = $true
+                      az account set --subscription '$(a_AzureSubscriptionId)'
+                      az functionapp deployment source config-zip `
+                        --resource-group '$(o_ResourceGroupName)' `
+                        --name '$(o_FunctionAppName)' `
+                        --src '$(Pipeline.Workspace)/$(g_AppArtifact)/$(g_AppPackage)'

@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lightkeeper.Client.AzDo/Lightkeeper.Client.AzDo.csproj" />
+    <Project Path="src/Lightkeeper.Functions/Lightkeeper.Functions.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lightkeeper.Client.AzDo.Tests/Lightkeeper.Client.AzDo.Tests.csproj" />
+    <Project Path="tests/Lightkeeper.Functions.Tests/Lightkeeper.Functions.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,34 @@
+<Project Sdk="Azure.Functions.Sdk">
+
+  <PropertyGroup>
+    <AzureFunctionsVersion>V4</AzureFunctionsVersion>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Lightkeeper.Functions</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.Exporter" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Timer" />
+    <PackageReference Include="Azure.Data.Tables" />
+    <PackageReference Include="Azure.Identity" />
+    <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lightkeeper.Client.AzDo\Lightkeeper.Client.AzDo.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="local.settings.template.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lightkeeper.Functions.Tests" />
+  </ItemGroup>
+
+</Project>

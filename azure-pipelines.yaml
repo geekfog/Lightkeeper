@@ -1,0 +1,57 @@
+# Builds and tests Lightkeeper, then releases to each environment through azure-pipelines-release.yaml.
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  - group: lightkeeper-vars
+  - name: g_BuildConfiguration
+    value: Release
+  - name: g_AppArtifact
+    value: app
+  - name: g_InfraArtifact
+    value: infra
+  - name: g_AppPackage
+    value: Lightkeeper.Functions.zip
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: Build
+    jobs:
+      - job: Build
+        steps:
+          - task: UseDotNet@2
+            displayName: Install .NET SDK from global.json
+            inputs:
+              useGlobalJson: true
+
+          - pwsh: dotnet test --configuration $(g_BuildConfiguration)
+            displayName: Build and test
+
+          - pwsh: dotnet publish src/Lightkeeper.Functions --configuration $(g_BuildConfiguration) --output $(Build.StagingDirectory)/publish
+            displayName: Publish function app
+
+          - task: ArchiveFiles@2
+            displayName: Package function app
+            inputs:
+              rootFolderOrFile: $(Build.StagingDirectory)/publish
+              includeRootFolder: false
+              archiveType: zip
+              archiveFile: $(Build.ArtifactStagingDirectory)/$(g_AppArtifact)/$(g_AppPackage)
+
+          - publish: $(Build.ArtifactStagingDirectory)/$(g_AppArtifact)
+            artifact: $(g_AppArtifact)
+            displayName: Publish app artifact
+
+          - publish: infra
+            artifact: $(g_InfraArtifact)
+            displayName: Publish infrastructure artifact
+
+  - template: azure-pipelines-release.yaml
+    parameters:
+      p_publishEnvironment: PRD
+      p_dependsOn: Build
+      p_hasMetCondition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))

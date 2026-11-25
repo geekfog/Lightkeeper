@@ -1,0 +1,149 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Azurite: start",
+      "type": "shell",
+      "command": "azurite --silent --skipApiVersionCheck --location ${workspaceFolder}/.azurite",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^x^"
+        },
+        "background": {
+          "activesBegin": ".",
+          "beginsPattern": ".",
+          "endsPattern": "."
+        }
+      }
+    },
+    {
+      "label": "Functions: host start",
+      "type": "shell",
+      "command": "func start --port 7071",
+      "options": {
+        "cwd": "${workspaceFolder}/src/Lightkeeper.Functions"
+      },
+      "dependsOn": "Azurite: start",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^x^"
+        },
+        "background": {
+          "activesBegin": true,
+          "beginsPattern": "Azure Functions Core Tools",
+          "endsPattern": "Host lock lease acquired|Worker process started and initialized"
+        }
+      }
+    },
+    {
+      "label": "Tests: run",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "test"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Send card previews",
+      "type": "shell",
+      "command": "pwsh -NoProfile -File ${workspaceFolder}/scripts/Send-CardPreviews.ps1",
+      "problemMatcher": []
+    },
+    {
+      "label": "Send test payload",
+      "type": "shell",
+      "command": "pwsh -NoProfile -File ${workspaceFolder}/scripts/Send-TestPayload.ps1",
+      "problemMatcher": []
+    },
+    {
+      "label": "clean (functions)",
+      "command": "dotnet",
+      "args": [
+        "clean",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "type": "process",
+      "problemMatcher": "$msCompile",
+      "options": {
+        "cwd": "${workspaceFolder}/src/Lightkeeper.Functions"
+      }
+    },
+    {
+      "label": "build (functions)",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "type": "process",
+      "dependsOn": "clean (functions)",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$msCompile",
+      "options": {
+        "cwd": "${workspaceFolder}/src/Lightkeeper.Functions"
+      }
+    },
+    {
+      "label": "clean release (functions)",
+      "command": "dotnet",
+      "args": [
+        "clean",
+        "--configuration",
+        "Release",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "type": "process",
+      "problemMatcher": "$msCompile",
+      "options": {
+        "cwd": "${workspaceFolder}/src/Lightkeeper.Functions"
+      }
+    },
+    {
+      "label": "publish (functions)",
+      "command": "dotnet",
+      "args": [
+        "publish",
+        "--configuration",
+        "Release",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "type": "process",
+      "dependsOn": "clean release (functions)",
+      "problemMatcher": "$msCompile",
+      "options": {
+        "cwd": "${workspaceFolder}/src/Lightkeeper.Functions"
+      }
+    },
+    {
+      "type": "func",
+      "dependsOn": "build (functions)",
+      "options": {
+        "cwd": "${workspaceFolder}/src/Lightkeeper.Functions/bin/Debug/net10.0"
+      },
+      "command": "host start",
+      "args": [
+        "--dotnet-isolated-debug",
+        "--enable-json-output"
+      ],
+      "isBackground": true,
+      "problemMatcher": "$func-dotnet-watch"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- Test method names describe behavior with underscores. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lightkeeper.Client.AzDo\Lightkeeper.Client.AzDo.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Lightkeeper.Functions.Tests\TestSupport\StubHttpMessageHandler.cs" Link="TestSupport\StubHttpMessageHandler.cs" />
+  </ItemGroup>
+
+</Project>

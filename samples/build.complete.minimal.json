@@ -1,0 +1,33 @@
+{
+  "subscriptionId": "aaaa0a0a-bb1b-cc2c-dd3d-eeeeee4e4e4e",
+  "notificationId": 1,
+  "id": "a0a0a0a0-bbbb-cccc-dddd-e1e1e1e1e1e1",
+  "eventType": "build.complete",
+  "publisherId": "tfs",
+  "message": {
+    "text": "Build 20241202.1 succeeded",
+    "html": "Build <a href=\"https://dev.azure.com/FabrikamFiber/web/build.aspx?pcguid=e4e4e4e4-ffff-aaaa-bbbb-c5c5c5c5c5c5&amp;builduri=azure-devops%3a%2f%2f%2fBuild%2fBuild%2f2727068\">20241202.1</a> succeeded",
+    "markdown": "Build [20241202.1](https://dev.azure.com/FabrikamFiber/web/build.aspx?pcguid=e4e4e4e4-ffff-aaaa-bbbb-c5c5c5c5c5c5&builduri=azure-devops%3a%2f%2f%2fBuild%2fBuild%2f2727068) succeeded"
+  },
+  "detailedMessage": {
+    "text": "Build 20241202.1 succeeded",
+    "html": "Build <a href=\"https://dev.azure.com/FabrikamFiber/web/build.aspx?pcguid=e4e4e4e4-ffff-aaaa-bbbb-c5c5c5c5c5c5&amp;builduri=azure-devops%3a%2f%2f%2fBuild%2fBuild%2f2727068\">20241202.1</a> succeeded",
+    "markdown": "Build [20241202.1](https://dev.azure.com/FabrikamFiber/web/build.aspx?pcguid=e4e4e4e4-ffff-aaaa-bbbb-c5c5c5c5c5c5&builduri=azure-devops%3a%2f%2f%2fBuild%2fBuild%2f2727068) succeeded"
+  },
+  "resource": {
+    "id": 2727068,
+    "buildNumber": "20241202.1",
+    "status": "completed",
+    "result": "succeeded",
+    "url": "https://dev.azure.com/FabrikamFiber/web/build.aspx?pcguid=e4e4e4e4-ffff-aaaa-bbbb-c5c5c5c5c5c5&builduri=azure-devops%3a%2f%2f%2fBuild%2fBuild%2f2727068",
+    "definition": {
+      "id": 1,
+      "name": "FabrikamFiber CI"
+    },
+    "project": {
+      "id": "11bb11bb-cc22-dd33-ee44-55ff55ff55ff",
+      "name": "FabrikamFiber"
+    }
+  },
+  "createdDate": "2024-12-02T12:21:13.8866607Z"
+}
