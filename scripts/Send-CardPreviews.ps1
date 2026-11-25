@@ -44,6 +44,13 @@ $loopback = '127.0.0.1'
 $azuriteTablePort = 10002
 $startupTimeout = [TimeSpan]::FromMinutes(3)
 $repositoryRoot = Join-Path $PSScriptRoot '..'
+$functionsProject = Join-Path $repositoryRoot 'src' 'Lightkeeper.Functions'
+$settingsPath = Join-Path $functionsProject 'local.settings.json'
+
+# Without it the host exits at once, closing its window, and this script would wait out the startup timeout.
+if (-not (Test-Path $settingsPath)) {
+    throw "$settingsPath is missing. Copy local.settings.template.json beside it to local.settings.json and fill it in (see Create local settings in the README)."
+}
 
 function Test-Port([int] $port) { Test-Connection -TargetName $loopback -TcpPort $port -Quiet }
 
@@ -67,7 +74,7 @@ function Start-IfMissing([string] $name, [int] $port, [string] $command, [string
 
 $null = Start-IfMissing 'Azurite' $azuriteTablePort 'azurite' @('--silent', '--skipApiVersionCheck', '--location', (Join-Path $repositoryRoot '.azurite')) `
     $repositoryRoot 'Install it with: npm install -g azurite'
-$functionsHost = Start-IfMissing 'The Functions host' $Uri.Port 'func' @('start', '--port', $Uri.Port) (Join-Path $repositoryRoot 'src' 'Lightkeeper.Functions') `
+$functionsHost = Start-IfMissing 'The Functions host' $Uri.Port 'func' @('start', '--port', $Uri.Port) $functionsProject `
     'Install it with: winget install Microsoft.Azure.FunctionsCoreTools'
 if (-not $functionsHost) { Write-Warning 'Using the Functions host that was already running; stop it first if the code has changed since it started.' }
 
@@ -118,7 +125,6 @@ $codePush = @{
 
 # A real pull request from the project, so the list has a starred pull request; a new repository ID each run gets past the announce-once check.
 function New-ActiveListPreview {
-    $settingsPath = Join-Path $repositoryRoot 'src' 'Lightkeeper.Functions' 'local.settings.json'
     $token = (Get-Content -Path $settingsPath -Raw | ConvertFrom-Json).Values.AzDo__PersonalAccessToken
     if (-not $token) { throw "Set AzDo__PersonalAccessToken in $settingsPath to preview the active pull request list." }
 
